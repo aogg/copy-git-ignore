@@ -148,21 +148,24 @@ func testCopyWithoutExcludes(t *testing.T, searchRoot, backupRoot string) {
 		t.Fatal("应该找到被忽略的文件")
 	}
 
-	// 验证找到的文件
+	// 验证找到的文件（根据新的过滤逻辑）
+	// repo1根目录有2个文件，被替换为repo1目录；vendor有1个文件，保留
+	// repo2根目录有1个文件，保留；build有1个文件，保留
 	expectedFiles := map[string]bool{
-		"repo1/debug.log":     true,
-		"repo1/temp.tmp":      true,
-		"repo1/vendor/lib.a":  true,
-		"repo2/app.bak":       true,
-		"repo2/build/output":  true,
+		"repo1":         true, // 替换了debug.log和temp.tmp
+		"repo1/vendor/lib.a": true, // vendor子目录只有一个文件
+		"repo2/app.bak":     true, // repo2根目录只有一个文件
+		"repo2/build/output": true, // build子目录只有一个文件
 	}
 
 	foundFiles := make(map[string]bool)
 	for _, file := range files {
-		relPath := strings.TrimPrefix(file.AbsPath, searchRoot+string(os.PathSeparator))
+		searchRootWithSep := searchRoot + string(os.PathSeparator)
+		relPath := strings.TrimPrefix(file.AbsPath, searchRootWithSep)
 		// 转换为正斜杠以便比较
 		relPath = strings.ReplaceAll(relPath, "\\", "/")
 		foundFiles[relPath] = true
+		t.Logf("找到文件: %s (AbsPath: %s, RelativePath: %s, searchRoot: %s)", relPath, file.AbsPath, file.RelativePath, searchRoot)
 	}
 
 	for expected := range expectedFiles {
@@ -181,11 +184,11 @@ func testCopyWithoutExcludes(t *testing.T, searchRoot, backupRoot string) {
 		t.Errorf("期望复制 %d 个文件，实际复制 %d 个", len(files), result.Copied)
 	}
 
-	// 验证文件已被复制
+	// 验证文件/目录已被复制
 	for _, file := range files {
 		destPath := filepath.Join(backupRoot, file.RelativePath)
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			t.Errorf("文件未被复制: %s", destPath)
+			t.Errorf("文件/目录未被复制: %s", destPath)
 		}
 	}
 }
@@ -256,7 +259,7 @@ func testIncrementalCopy(t *testing.T, searchRoot, backupRoot string) {
 	}
 
 	if result2.Skipped != len(files) {
-		t.Errorf("增量复制时期望跳过 %d 个文件，实际跳过 %d 个", len(files), result2.Skipped)
+		t.Errorf("增量复制时期望跳过 %d 个文件/目录，实际跳过 %d 个", len(files), result2.Skipped)
 	}
 
 	// 修改一个源文件的时间戳，使其看起来更新

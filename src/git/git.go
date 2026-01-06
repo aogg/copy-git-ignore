@@ -67,3 +67,29 @@ func IsGitRepository(dir string) bool {
 	info, err := exec.Command("cmd", "/c", "if exist \""+gitDir+"\" echo exists").Output()
 	return err == nil && strings.TrimSpace(string(info)) == "exists"
 }
+
+// IsPathIgnored 检查指定路径是否被 git 忽略
+func IsPathIgnored(repoRoot, path string) (bool, error) {
+	// 计算相对于仓库根目录的路径
+	relPath, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return false, fmt.Errorf("计算相对路径失败: %v", err)
+	}
+
+	// 使用 git check-ignore 命令检查路径是否被忽略
+	cmd := exec.Command("git", "-C", repoRoot, "check-ignore", "-q", relPath)
+	err = cmd.Run()
+
+	// 如果命令返回 0，表示路径被忽略
+	if err == nil {
+		return true, nil
+	}
+
+	// 如果命令返回 1，表示路径未被忽略（这是正常情况）
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+
+	// 其他错误
+	return false, fmt.Errorf("检查忽略状态失败: %v", err)
+}

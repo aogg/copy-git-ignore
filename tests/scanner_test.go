@@ -236,30 +236,45 @@ func TestFilterRedundantFiles(t *testing.T) {
 		})
 	}
 
-	// 首先测试正常情况（没有目录被过滤）
+	// 测试过滤逻辑
 	filtered := scanner.FilterRedundantFiles(files)
-	if len(filtered) != len(files) {
-		t.Errorf("期望过滤后有 %d 个文件，实际有 %d 个", len(files), len(filtered))
-	}
 
-	// 创建一个包含目录的情况
-	// 假设 dir1 是一个被忽略的目录
-	dir1Path := filepath.Join(tempDir, "dir1")
-	filesWithDir := append(files, scanner.IgnoredFileInfo{
-		AbsPath:      dir1Path,
-		RelativePath: "dir1",
-		RepoRoot:     tempDir,
-	})
-
-	// 过滤应该移除 dir1 下的文件
-	filteredWithDir := scanner.FilterRedundantFiles(filesWithDir)
-
-	// 应该保留：file1.txt, dir2/file5.txt, dir1（目录本身）
-	expectedCount := 3
-	if len(filteredWithDir) != expectedCount {
-		t.Errorf("期望过滤后有 %d 个文件，实际有 %d 个", expectedCount, len(filteredWithDir))
-		for i, f := range filteredWithDir {
+	// 应该保留：file1.txt, dir2/file5.txt, dir1（因为dir1下有2个文件，被替换为目录）, dir1/subdir/file4.txt（因为subdir只有一个文件）
+	expectedCount := 4
+	if len(filtered) != expectedCount {
+		t.Errorf("期望过滤后有 %d 个文件，实际有 %d 个", expectedCount, len(filtered))
+		for i, f := range filtered {
 			t.Logf("保留的文件 %d: %s", i, f.RelativePath)
 		}
+	}
+
+	// 验证结果
+	foundDir1 := false
+	foundFile1 := false
+	foundDir2File5 := false
+	foundSubdirFile := false
+	for _, f := range filtered {
+		switch f.RelativePath {
+		case "dir1":
+			foundDir1 = true
+		case "file1.txt":
+			foundFile1 = true
+		case "dir2/file5.txt":
+			foundDir2File5 = true
+		case "dir1/subdir/file4.txt":
+			foundSubdirFile = true
+		}
+	}
+	if !foundDir1 {
+		t.Error("期望dir1被替换为目录条目")
+	}
+	if !foundFile1 {
+		t.Error("期望保留file1.txt")
+	}
+	if !foundDir2File5 {
+		t.Error("期望保留dir2/file5.txt")
+	}
+	if !foundSubdirFile {
+		t.Error("期望保留dir1/subdir/file4.txt")
 	}
 }
