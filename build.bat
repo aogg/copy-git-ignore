@@ -13,6 +13,9 @@ if %errorlevel% neq 0 (
 
 REM 优化构建
 echo 构建优化版本...
+echo 1. 最直观：可执行文件体积大幅减小
+echo 2. 不可见：调试能力完全丧失
+echo 3. 无性能损耗：运行逻辑完全不变
 go build -ldflags="-s -w" -o copy-ignore-release.exe main.go
 if %errorlevel% neq 0 (
     echo 构建失败
