@@ -40,7 +40,6 @@ func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldE
 	for _, repoRoot := range repos {
 		// 第一步：检查仓库根目录下的直接子目录是否被忽略
 		// 这样可以一次性识别出整个被忽略的目录（如 demo/）
-		ignoredDirs := make(map[string]bool)
 		directIgnoredDirs := make(map[string]bool)
 
 		// 读取仓库根目录
@@ -50,7 +49,7 @@ func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldE
 			continue
 		}
 
-		// 检查每个直接子目录是否被忽略
+		// 检查每个直接子目录是否被忽略（只检查直接子目录，一次性批量处理）
 		for _, entry := range rootEntries {
 			if !entry.IsDir() {
 				continue // 只处理目录
@@ -72,14 +71,7 @@ func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldE
 			}
 
 			if isIgnored {
-				// 应用排除规则
-				if excluder.ShouldExclude(dirPath) {
-					continue
-				}
-
-				// 目录被忽略，标记它和其所有子目录
 				directIgnoredDirs[dirPath] = true
-				ignoredDirs[dirPath] = true
 
 				// 计算相对于搜索根目录的相对路径
 				relToSearchRoot, err := filepath.Rel(searchRoot, dirPath)
@@ -130,64 +122,6 @@ func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldE
 				continue
 			}
 
-			// 检查文件的其他父目录是否被忽略（不包括直接子目录）
-			// 从文件的直接父目录开始，向上检查到仓库根目录
-			currentPath := filepath.Dir(absPath)
-			for {
-				if currentPath == repoRoot {
-					break
-				}
-
-				// 如果这个目录已经被标记为被忽略，跳过当前文件
-				if ignoredDirs[currentPath] {
-					skipFile = true
-					break
-				}
-
-				// 如果这个目录是被忽略的直接子目录，跳过当前文件
-				if directIgnoredDirs[currentPath] {
-					skipFile = true
-					break
-				}
-
-				// 检查这个目录是否被忽略
-				isIgnored, err := git.IsPathIgnored(repoRoot, currentPath)
-				if err != nil {
-					// 检查失败，继续处理文件
-					currentPath = filepath.Dir(currentPath)
-					continue
-				}
-
-				if isIgnored {
-					// 目录被忽略，标记并跳过所有该目录下的文件
-					ignoredDirs[currentPath] = true
-					skipFile = true
-
-					// 计算相对于搜索根目录的相对路径
-					relToSearchRoot, err := filepath.Rel(searchRoot, currentPath)
-					if err != nil {
-						relToSearchRoot = currentPath
-					}
-
-					// 添加目录到结果
-					dirInfo := IgnoredFileInfo{
-						AbsPath:      currentPath,
-						RelativePath: relToSearchRoot,
-						RepoRoot:     repoRoot,
-					}
-					repoFiles = append(repoFiles, dirInfo)
-					break
-				}
-
-				// 继续检查父目录
-				currentPath = filepath.Dir(currentPath)
-			}
-
-			// 如果文件应该被跳过，继续处理下一个文件
-			if skipFile {
-				continue
-			}
-
 			// 计算相对于搜索根目录的相对路径
 			relToSearchRoot, err := filepath.Rel(searchRoot, absPath)
 			if err != nil {
@@ -204,9 +138,13 @@ func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldE
 			repoFiles = append(repoFiles, fileInfo)
 		}
 
-	// 过滤掉被父目录包含的文件
-	filteredFiles := FilterRedundantFiles(repoFiles, ignoredDirs)
-	allFiles = append(allFiles, filteredFiles...)
+		// 过滤掉被父目录包含的文件（聚合优化）
+		ignoredDirs := make(map[string]bool)
+		for dir := range directIgnoredDirs {
+			ignoredDirs[dir] = true
+		}
+		filteredFiles := FilterRedundantFiles(repoFiles, ignoredDirs)
+		allFiles = append(allFiles, filteredFiles...)
 	}
 
 	return allFiles, nil
@@ -218,45 +156,58 @@ func findGitRepositories(root string) ([]string, error) {
 	return findGitRepositoriesWithProgress(root, nil)
 }
 
-// findGitRepositoriesWithProgress 递归查找指定目录下的所有 Git 仓库
+// findGitRepositoriesWithProgress 广度优先查找指定目录下的所有 Git 仓库
 // progress 回调函数会在遍历过程中被调用，传入当前正在扫描的绝对路径
 // 返回所有找到的仓库根目录列表
 func findGitRepositoriesWithProgress(root string, progress func(absPath string)) ([]string, error) {
 	var repos []string
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			// 跳过无法访问的目录
-			if os.IsPermission(err) {
-				return filepath.SkipDir
-			}
-			return err
-		}
+	// 使用队列实现广度优先搜索
+	queue := []string{root}
+	visited := make(map[string]bool)
 
-		// 只处理目录
-		if !info.IsDir() {
-			return nil
+	for len(queue) > 0 {
+		currentDir := queue[0]
+		queue = queue[1:]
+
+		// 避免重复处理
+		if visited[currentDir] {
+			continue
 		}
+		visited[currentDir] = true
 
 		// 调用进度回调
 		if progress != nil {
-			progress(path)
+			progress(currentDir)
 		}
 
-		// 检查是否为 Git 仓库
-		if isGitRepo(path) {
-			repos = append(repos, path)
-
-			// 找到仓库后，继续扫描其子目录（可能有嵌套仓库）
-			// 每个 .git 目录都是独立的仓库
-			return nil
+		// 先判断当前目录是否为 Git 仓库
+		if isGitRepo(currentDir) {
+			repos = append(repos, currentDir)
+			// 如果是 Git 仓库，后续就不需要扫描这个文件夹的子孙了
+			continue
 		}
 
-		return nil
-	})
+		// 如果不是 Git 仓库，才扫描其子目录
+		entries, err := os.ReadDir(currentDir)
+		if err != nil {
+			// 跳过无法访问的目录
+			if os.IsPermission(err) {
+				continue
+			}
+			return nil, err
+		}
 
-	if err != nil {
-		return nil, err
+		// 将子目录添加到队列中（广度优先）
+		for _, entry := range entries {
+			if entry.IsDir() {
+				childDir := filepath.Join(currentDir, entry.Name())
+				// 确保不超出搜索根目录
+				if rel, err := filepath.Rel(root, childDir); err == nil && !strings.HasPrefix(rel, "..") {
+					queue = append(queue, childDir)
+				}
+			}
+		}
 	}
 
 	return repos, nil

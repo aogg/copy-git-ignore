@@ -44,7 +44,12 @@ func NewMatcher(patterns []string) (*Matcher, error) {
 				if dirName != "" {
 					normalized = "**/" + dirName + "/**"
 				}
+			} else if !strings.Contains(normalized, "/") {
+				// 对于不包含路径分隔符的简单通配符模式（如 *.log），添加 **/ 前缀
+				// 使其能在任何目录下匹配
+				normalized = "**/" + normalized
 			}
+			// 如果已经包含路径分隔符（如 dir/*.log），保持原样
 		} else {
 			// 对于不包含通配符的相对路径模式，添加 **/ 前缀和 /** 后缀，使其匹配任何路径中包含该目录的情况
 			normalized = "**/" + normalized + "/**"

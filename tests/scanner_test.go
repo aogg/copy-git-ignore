@@ -91,7 +91,7 @@ func TestScanIgnoredFiles_NestedRepos(t *testing.T) {
 	createGitignore(t, parentRepo, "*.parent\n")
 	createIgnoredFile(t, parentRepo, "file.parent", "parent content")
 
-	// 创建子仓库
+	// 创建子仓库（但由于父仓库的存在，子仓库不会被扫描到）
 	if err := os.MkdirAll(childRepo, 0755); err != nil {
 		t.Fatalf("创建子目录失败: %v", err)
 	}
@@ -109,30 +109,18 @@ func TestScanIgnoredFiles_NestedRepos(t *testing.T) {
 		t.Fatalf("扫描失败: %v", err)
 	}
 
-	if len(files) != 2 {
-		t.Fatalf("期望找到 2 个文件，实际找到 %d 个", len(files))
+	// 由于广度优先搜索且遇到git仓库就不再扫描子孙，现在应该只找到父仓库的文件
+	if len(files) != 1 {
+		t.Fatalf("期望找到 1 个文件（只有父仓库的），实际找到 %d 个", len(files))
 	}
 
-	// 验证文件来自正确的仓库
-	foundParent := false
-	foundChild := false
-
-	for _, file := range files {
-		if filepath.Ext(file.AbsPath) == ".parent" {
-			foundParent = true
-			if file.RepoRoot != parentRepo {
-				t.Errorf("parent 文件应该来自父仓库")
-			}
-		} else if filepath.Ext(file.AbsPath) == ".child" {
-			foundChild = true
-			if file.RepoRoot != childRepo {
-				t.Errorf("child 文件应该来自子仓库")
-			}
-		}
+	// 验证只找到父仓库的文件
+	file := files[0]
+	if filepath.Ext(file.AbsPath) != ".parent" {
+		t.Errorf("期望找到 .parent 文件，实际找到: %s", filepath.Ext(file.AbsPath))
 	}
-
-	if !foundParent || !foundChild {
-		t.Error("没有找到期望的文件类型")
+	if file.RepoRoot != parentRepo {
+		t.Errorf("文件应该来自父仓库 %s，实际来自 %s", parentRepo, file.RepoRoot)
 	}
 }
 
