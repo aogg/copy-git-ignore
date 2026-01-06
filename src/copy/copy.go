@@ -18,6 +18,38 @@ type CopyResult struct {
 	Errors  int // 复制出错的文件数
 }
 
+// RealTimeCopyResult 支持实时统计的复制结果
+type RealTimeCopyResult struct {
+	mu      sync.RWMutex
+	Copied  int // 实际复制的文件数
+	Skipped int // 跳过的文件数
+	Errors  int // 复制出错的文件数
+	Total   int // 总文件数（实时更新）
+}
+
+// AddResult 线程安全地添加复制结果
+func (r *RealTimeCopyResult) AddResult(copied, skipped, errors int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Copied += copied
+	r.Skipped += skipped
+	r.Errors += errors
+}
+
+// GetCurrentStats 获取当前统计（线程安全）
+func (r *RealTimeCopyResult) GetCurrentStats() (copied, skipped, errors, total int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Copied, r.Skipped, r.Errors, r.Total
+}
+
+// SetTotal 设置总数
+func (r *RealTimeCopyResult) SetTotal(total int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Total = total
+}
+
 // CopyFiles 并行复制文件列表到指定目录
 func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int, verbose bool) (*CopyResult, error) {
 	if len(files) == 0 {
@@ -73,6 +105,82 @@ func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int
 	return result, nil
 }
 
+// CopyFilesStreamWithProgress 从channel接收文件并异步复制，支持实时进度反馈
+func CopyFilesStreamWithProgress(
+	fileChan <-chan scanner.IgnoredFileInfo,
+	destRoot string,
+	concurrency int,
+	verbose bool,
+	onProgress func(copied, skipped, errors, total int, lastSrc, lastDest string), // 进度回调
+) (*CopyResult, error) {
+
+	result := &RealTimeCopyResult{}
+
+	// 创建工作池，使用更大的缓冲区避免死锁
+	jobs := make(chan copyJob, 1000)
+	results := make(chan copyResult, 1000)
+
+	// 启动工作协程
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			copyWorker(jobs, results)
+		}()
+	}
+
+	// 启动结果收集器
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// 从文件channel接收并发送到jobs，同时更新总数
+	go func() {
+		fileCount := 0
+		for file := range fileChan {
+			destPath := filepath.Join(destRoot, file.RelativePath)
+			jobs <- copyJob{
+				srcPath: file.AbsPath,
+				destPath: destPath,
+				verbose: verbose,
+			}
+			fileCount++
+			result.SetTotal(fileCount)
+		}
+		close(jobs)
+	}()
+
+	// 收集结果并实时反馈
+	for res := range results {
+		if res.err != nil {
+			result.AddResult(0, 0, 1)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "复制失败 %s: %v\n", res.srcPath, res.err)
+			}
+		} else if res.skipped {
+			result.AddResult(0, 1, 0)
+		} else {
+			result.AddResult(1, 0, 0)
+		}
+
+		// 实时调用进度回调
+		if onProgress != nil {
+			copied, skipped, errors, total := result.GetCurrentStats()
+			onProgress(copied, skipped, errors, total, res.srcPath, res.destPath)
+		}
+	}
+
+	// 返回最终结果
+	finalCopied, finalSkipped, finalErrors, _ := result.GetCurrentStats()
+	return &CopyResult{
+		Copied:  finalCopied,
+		Skipped: finalSkipped,
+		Errors:  finalErrors,
+	}, nil
+}
+
 // copyJob 表示单个复制任务
 type copyJob struct {
 	srcPath  string
@@ -82,9 +190,10 @@ type copyJob struct {
 
 // copyResult 表示复制任务的结果
 type copyResult struct {
-	srcPath string
-	skipped bool
-	err     error
+	srcPath  string
+	destPath string
+	skipped  bool
+	err      error
 }
 
 // copyWorker 执行复制工作的协程
@@ -92,9 +201,10 @@ func copyWorker(jobs <-chan copyJob, results chan<- copyResult) {
 	for job := range jobs {
 		skipped, err := copyFile(job.srcPath, job.destPath, job.verbose)
 		results <- copyResult{
-			srcPath: job.srcPath,
-			skipped: skipped,
-			err:     err,
+			srcPath:  job.srcPath,
+			destPath: job.destPath,
+			skipped:  skipped,
+			err:      err,
 		}
 	}
 }

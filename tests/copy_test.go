@@ -273,3 +273,158 @@ func TestCopyFiles_SourceNotExist(t *testing.T) {
 		t.Errorf("期望复制 0 个文件，实际复制 %d 个", result.Copied)
 	}
 }
+
+func TestCopyFilesStreamWithProgress_EmptyChannel(t *testing.T) {
+	tempDir := t.TempDir()
+	backupRoot := filepath.Join(tempDir, "backup")
+
+	fileChan := make(chan scanner.IgnoredFileInfo, 1)
+	close(fileChan) // 空channel
+
+	progressCalled := false
+	onProgress := func(copied, skipped, errors, total int, lastSrc, lastDest string) {
+		progressCalled = true
+	}
+
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	if err != nil {
+		t.Fatalf("流式复制空channel失败: %v", err)
+	}
+
+	if result.Copied != 0 || result.Skipped != 0 || result.Errors != 0 {
+		t.Errorf("空channel复制结果不正确: %+v", result)
+	}
+
+	if progressCalled {
+		t.Errorf("空channel不应该调用进度回调")
+	}
+}
+
+func TestCopyFilesStreamWithProgress_SingleFile(t *testing.T) {
+	tempDir := t.TempDir()
+	srcDir := filepath.Join(tempDir, "src")
+	backupRoot := filepath.Join(tempDir, "backup")
+
+	// 创建源文件
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatalf("创建源目录失败: %v", err)
+	}
+
+	srcFile := filepath.Join(srcDir, "test.txt")
+	content := "测试文件内容"
+	if err := os.WriteFile(srcFile, []byte(content), 0644); err != nil {
+		t.Fatalf("创建源文件失败: %v", err)
+	}
+
+	fileChan := make(chan scanner.IgnoredFileInfo, 1)
+
+	// 创建文件信息
+	fileInfo := scanner.IgnoredFileInfo{
+		AbsPath:      srcFile,
+		RelativePath: "test.txt",
+		RepoRoot:     srcDir,
+	}
+	fileChan <- fileInfo
+	close(fileChan)
+
+	var progressCalls []struct {
+		copied, skipped, errors, total int
+		src, dest                     string
+	}
+
+	onProgress := func(copied, skipped, errors, total int, lastSrc, lastDest string) {
+		progressCalls = append(progressCalls, struct {
+			copied, skipped, errors, total int
+			src, dest                     string
+		}{copied, skipped, errors, total, lastSrc, lastDest})
+	}
+
+	// 执行流式复制
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	if err != nil {
+		t.Fatalf("流式复制失败: %v", err)
+	}
+
+	if result.Copied != 1 {
+		t.Errorf("期望复制 1 个文件，实际复制 %d 个", result.Copied)
+	}
+
+	// 验证进度回调被调用
+	if len(progressCalls) == 0 {
+		t.Errorf("进度回调没有被调用")
+	}
+
+	// 验证最后一次回调包含正确的路径
+	lastCall := progressCalls[len(progressCalls)-1]
+	if lastCall.src != srcFile {
+		t.Errorf("最后回调的源路径不正确: 期望 %s, 实际 %s", srcFile, lastCall.src)
+	}
+
+	expectedDest := filepath.Join(backupRoot, "test.txt")
+	if lastCall.dest != expectedDest {
+		t.Errorf("最后回调的目标路径不正确: 期望 %s, 实际 %s", expectedDest, lastCall.dest)
+	}
+
+	// 验证目标文件
+	destFile := filepath.Join(backupRoot, "test.txt")
+	destContent, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("读取目标文件失败: %v", err)
+	}
+
+	if string(destContent) != content {
+		t.Errorf("目标文件内容不匹配")
+	}
+}
+
+func TestCopyFilesStreamWithProgress_ErrorHandling(t *testing.T) {
+	tempDir := t.TempDir()
+	backupRoot := filepath.Join(tempDir, "backup")
+
+	fileChan := make(chan scanner.IgnoredFileInfo, 1)
+
+	// 创建不存在的源文件信息
+	fileInfo := scanner.IgnoredFileInfo{
+		AbsPath:      filepath.Join(tempDir, "nonexistent.txt"),
+		RelativePath: "nonexistent.txt",
+		RepoRoot:     tempDir,
+	}
+	fileChan <- fileInfo
+	close(fileChan)
+
+	var progressCalls []struct {
+		copied, skipped, errors, total int
+		src, dest                     string
+	}
+
+	onProgress := func(copied, skipped, errors, total int, lastSrc, lastDest string) {
+		progressCalls = append(progressCalls, struct {
+			copied, skipped, errors, total int
+			src, dest                     string
+		}{copied, skipped, errors, total, lastSrc, lastDest})
+	}
+
+	// 执行流式复制
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	if err != nil {
+		t.Fatalf("流式复制失败: %v", err)
+	}
+
+	if result.Errors != 1 {
+		t.Errorf("期望 1 个错误，实际 %d 个", result.Errors)
+	}
+
+	if result.Copied != 0 {
+		t.Errorf("期望复制 0 个文件，实际复制 %d 个", result.Copied)
+	}
+
+	// 验证进度回调包含错误信息
+	if len(progressCalls) == 0 {
+		t.Errorf("进度回调没有被调用")
+	}
+
+	lastCall := progressCalls[len(progressCalls)-1]
+	if lastCall.errors != 1 {
+		t.Errorf("最后回调的错误数不正确: 期望 1, 实际 %d", lastCall.errors)
+	}
+}

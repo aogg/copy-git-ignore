@@ -160,6 +160,124 @@ func TestScanIgnoredFiles_WithExcludes(t *testing.T) {
 	}
 }
 
+func TestScanIgnoredFilesWithProgressStreamConcurrent(t *testing.T) {
+	if !isGitAvailable() {
+		t.Skip("Git 不在 PATH 中，跳过测试")
+	}
+
+	tempDir := t.TempDir()
+	repoDir := filepath.Join(tempDir, "repo")
+
+	// 创建并初始化 Git 仓库
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	initGitRepo(t, repoDir)
+
+	// 创建 .gitignore 和被忽略的文件
+	createGitignore(t, repoDir, "*.log\ntemp/\n")
+	createIgnoredFilesInRepo(t, repoDir)
+
+	excluder, err := exclude.NewMatcher([]string{})
+	if err != nil {
+		t.Fatalf("创建排除匹配器失败: %v", err)
+	}
+
+	// 使用并发扫描，设置 numWorkers=1 以确保确定性
+	fileChan := make(chan scanner.IgnoredFileInfo, 100)
+	errChan := make(chan error, 1)
+
+	go func() {
+		errChan <- scanner.ScanIgnoredFilesWithProgressStreamConcurrent(tempDir, excluder, nil, fileChan, 1)
+		close(fileChan)
+	}()
+
+	var files []scanner.IgnoredFileInfo
+	for file := range fileChan {
+		files = append(files, file)
+	}
+
+	if err := <-errChan; err != nil {
+		t.Fatalf("并发扫描失败: %v", err)
+	}
+
+	if len(files) == 0 {
+		t.Fatal("期望找到被忽略的文件")
+	}
+
+	// 验证所有文件都来自正确的仓库
+	for _, file := range files {
+		if file.RepoRoot != repoDir {
+			t.Errorf("文件应该来自仓库 %s，实际来自 %s", repoDir, file.RepoRoot)
+		}
+
+		// 验证绝对路径存在
+		if _, err := os.Stat(file.AbsPath); os.IsNotExist(err) {
+			t.Errorf("文件不存在: %s", file.AbsPath)
+		}
+	}
+}
+
+func TestScanIgnoredFilesWithProgressStreamConcurrent_MultipleWorkers(t *testing.T) {
+	if !isGitAvailable() {
+		t.Skip("Git 不在 PATH 中，跳过测试")
+	}
+
+	tempDir := t.TempDir()
+
+	// 创建多个仓库来测试并发
+	repoDirs := []string{"repo1", "repo2", "repo3"}
+	for _, repoName := range repoDirs {
+		repoDir := filepath.Join(tempDir, repoName)
+		if err := os.MkdirAll(repoDir, 0755); err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+
+		initGitRepo(t, repoDir)
+		createGitignore(t, repoDir, "*.log\n")
+		createIgnoredFile(t, repoDir, "test.log", "log content")
+	}
+
+	excluder, err := exclude.NewMatcher([]string{})
+	if err != nil {
+		t.Fatalf("创建排除匹配器失败: %v", err)
+	}
+
+	// 使用多个 worker 进行并发扫描
+	fileChan := make(chan scanner.IgnoredFileInfo, 100)
+	errChan := make(chan error, 1)
+
+	go func() {
+		errChan <- scanner.ScanIgnoredFilesWithProgressStreamConcurrent(tempDir, excluder, nil, fileChan, 3)
+		close(fileChan)
+	}()
+
+	var files []scanner.IgnoredFileInfo
+	for file := range fileChan {
+		files = append(files, file)
+	}
+
+	if err := <-errChan; err != nil {
+		t.Fatalf("并发扫描失败: %v", err)
+	}
+
+	// 应该找到 3 个文件（每个仓库一个 .log 文件）
+	if len(files) != 3 {
+		t.Errorf("期望找到 3 个文件，实际找到 %d 个", len(files))
+	}
+
+	// 验证所有仓库都被处理了
+	repoFound := make(map[string]bool)
+	for _, file := range files {
+		repoFound[file.RepoRoot] = true
+	}
+
+	if len(repoFound) != 3 {
+		t.Errorf("期望处理 3 个仓库，实际处理了 %d 个", len(repoFound))
+	}
+}
+
 // createIgnoredFilesInRepo 创建测试用的被忽略文件
 func createIgnoredFilesInRepo(t *testing.T, repo string) {
 	files := map[string]string{
