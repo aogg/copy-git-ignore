@@ -204,6 +204,8 @@ func createIgnoredFile(t *testing.T, repo, relPath, content string) {
 // TestFilterRedundantFiles 测试过滤冗余文件的逻辑
 func TestFilterRedundantFiles(t *testing.T) {
 	tempDir := t.TempDir()
+	// 模拟searchRoot是tempDir的父目录，这样RelativePath的计算才是正确的
+	repoName := filepath.Base(tempDir)
 
 	// 创建测试文件结构
 	testFiles := []string{
@@ -229,17 +231,21 @@ func TestFilterRedundantFiles(t *testing.T) {
 			t.Fatalf("创建文件失败 %s: %v", fullPath, err)
 		}
 
+		// 计算相对于searchRoot的相对路径
+		relToSearchRoot := filepath.Join(repoName, relPath)
+
 		files = append(files, scanner.IgnoredFileInfo{
 			AbsPath:      fullPath,
-			RelativePath: relPath,
+			RelativePath: relToSearchRoot,
 			RepoRoot:     tempDir,
 		})
 	}
 
 	// 测试过滤逻辑
-	filtered := scanner.FilterRedundantFiles(files)
+	ignoredDirs := make(map[string]bool)
+	filtered := scanner.FilterRedundantFiles(files, ignoredDirs)
 
-	// 应该保留：file1.txt, dir2/file5.txt, dir1（因为dir1下有2个文件，被替换为目录）, dir1/subdir/file4.txt（因为subdir只有一个文件）
+	// 应该保留：repoName/file1.txt, repoName/dir2/file5.txt, repoName/dir1（因为dir1下有2个文件，被替换为目录）, repoName/dir1/subdir/file4.txt（因为subdir只有一个文件）
 	expectedCount := 4
 	if len(filtered) != expectedCount {
 		t.Errorf("期望过滤后有 %d 个文件，实际有 %d 个", expectedCount, len(filtered))
@@ -249,19 +255,24 @@ func TestFilterRedundantFiles(t *testing.T) {
 	}
 
 	// 验证结果
+	expectedDir1 := filepath.Join(repoName, "dir1")
+	expectedFile1 := filepath.Join(repoName, "file1.txt")
+	expectedDir2File5 := filepath.Join(repoName, "dir2/file5.txt")
+	expectedSubdirFile := filepath.Join(repoName, "dir1/subdir/file4.txt")
+
 	foundDir1 := false
 	foundFile1 := false
 	foundDir2File5 := false
 	foundSubdirFile := false
 	for _, f := range filtered {
 		switch f.RelativePath {
-		case "dir1":
+		case expectedDir1:
 			foundDir1 = true
-		case "file1.txt":
+		case expectedFile1:
 			foundFile1 = true
-		case "dir2/file5.txt":
+		case expectedDir2File5:
 			foundDir2File5 = true
-		case "dir1/subdir/file4.txt":
+		case expectedSubdirFile:
 			foundSubdirFile = true
 		}
 	}

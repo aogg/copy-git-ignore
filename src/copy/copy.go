@@ -124,6 +124,11 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 		return false, fmt.Errorf("检查目标文件失败: %v", err)
 	}
 
+	// 如果是目录，递归复制整个目录
+	if srcInfo.IsDir() {
+		return copyDir(srcPath, destPath, verbose)
+	}
+
 	// 需要复制：创建目标目录
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -182,4 +187,42 @@ func copyFileContent(srcPath, destPath string) error {
 
 	// 确保数据写入磁盘
 	return destFile.Sync()
+}
+
+// copyDir 递归复制目录
+func copyDir(srcPath, destPath string, verbose bool) (skipped bool, err error) {
+	// 创建目标目录
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return false, fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	// 读取源目录内容
+	entries, err := os.ReadDir(srcPath)
+	if err != nil {
+		return false, fmt.Errorf("读取源目录失败: %v", err)
+	}
+
+	// 递归复制所有文件和子目录
+	for _, entry := range entries {
+		srcEntryPath := filepath.Join(srcPath, entry.Name())
+		destEntryPath := filepath.Join(destPath, entry.Name())
+
+		if entry.IsDir() {
+			// 递归复制子目录
+			if _, err := copyDir(srcEntryPath, destEntryPath, verbose); err != nil {
+				return false, fmt.Errorf("复制子目录失败 %s: %v", srcEntryPath, err)
+			}
+		} else {
+			// 复制文件
+			if _, err := copyFile(srcEntryPath, destEntryPath, verbose); err != nil {
+				return false, fmt.Errorf("复制文件失败 %s: %v", srcEntryPath, err)
+			}
+		}
+	}
+
+	if verbose {
+		fmt.Printf("已复制目录: %s -> %s\n", srcPath, destPath)
+	}
+
+	return false, nil
 }

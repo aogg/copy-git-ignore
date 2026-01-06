@@ -149,13 +149,13 @@ func testCopyWithoutExcludes(t *testing.T, searchRoot, backupRoot string) {
 	}
 
 	// 验证找到的文件（根据新的过滤逻辑）
-	// repo1根目录有2个文件，被替换为repo1目录；vendor有1个文件，保留
-	// repo2根目录有1个文件，保留；build有1个文件，保留
+	// repo1根目录有2个文件，被替换为repo1目录；vendor目录被忽略，作为目录保留
+	// repo2根目录有1个文件，保留；build目录被忽略，作为目录保留
 	expectedFiles := map[string]bool{
 		"repo1":         true, // 替换了debug.log和temp.tmp
-		"repo1/vendor/lib.a": true, // vendor子目录只有一个文件
+		"repo1/vendor": true, // vendor目录被忽略
 		"repo2/app.bak":     true, // repo2根目录只有一个文件
-		"repo2/build/output": true, // build子目录只有一个文件
+		"repo2/build":  true, // build目录被忽略
 	}
 
 	foundFiles := make(map[string]bool)

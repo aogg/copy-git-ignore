@@ -6,10 +6,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/aogg/copy-ignore/src/scanner"
-	"github.com/aogg/copy-ignore/src/exclude"
 	"github.com/aogg/copy-ignore/src/copy"
+	"github.com/aogg/copy-ignore/src/exclude"
+	"github.com/aogg/copy-ignore/src/scanner"
 )
 
 // Config 包含程序的所有配置
@@ -41,10 +42,34 @@ func main() {
 
 	// 扫描所有 Git 仓库并获取被忽略的文件
 	fmt.Printf("正在扫描目录: %s\n", config.SearchRoot)
-	files, err := scanner.ScanIgnoredFiles(config.SearchRoot, excluder)
+
+	// 创建进度显示回调
+	prevLen := 0
+	maxLen := 100 // 限制最大显示长度，避免换行
+	progress := func(path string) {
+		// 截断过长的路径
+		displayPath := path
+		if len(displayPath) > maxLen {
+			// 显示路径的开头部分和结尾部分
+			displayPath = displayPath[:maxLen-3] + "..."
+		}
+
+		// 回到行首，打印新路径，如果新路径比旧路径短，用空格覆盖剩余部分
+		fmt.Printf("\r%s", displayPath)
+		if len(displayPath) < prevLen {
+			fmt.Printf("%s", strings.Repeat(" ", prevLen-len(displayPath)))
+		}
+		prevLen = len(displayPath)
+	}
+
+	files, err := scanner.ScanIgnoredFilesWithProgress(config.SearchRoot, excluder, progress)
 	if err != nil {
+		fmt.Println() // 换行以恢复正常输出
 		log.Fatalf("扫描失败: %v", err)
 	}
+
+	// 扫描结束后换行以恢复正常输出
+	fmt.Println()
 
 	if len(files) == 0 {
 		fmt.Println("未找到需要备份的被忽略文件")

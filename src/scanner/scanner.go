@@ -18,10 +18,16 @@ type IgnoredFileInfo struct {
 
 // ScanIgnoredFiles 扫描指定根目录下的所有 Git 仓库，并返回所有被忽略且未被排除的文件
 func ScanIgnoredFiles(searchRoot string, excluder interface{ ShouldExclude(path string) bool }) ([]IgnoredFileInfo, error) {
+	return ScanIgnoredFilesWithProgress(searchRoot, excluder, nil)
+}
+
+// ScanIgnoredFilesWithProgress 扫描指定根目录下的所有 Git 仓库，并返回所有被忽略且未被排除的文件
+// progress 回调函数会在扫描过程中被调用，传入当前正在扫描的绝对路径
+func ScanIgnoredFilesWithProgress(searchRoot string, excluder interface{ ShouldExclude(path string) bool }, progress func(absPath string)) ([]IgnoredFileInfo, error) {
 	var allFiles []IgnoredFileInfo
 
 	// 递归查找所有 Git 仓库
-	repos, err := findGitRepositories(searchRoot)
+	repos, err := findGitRepositoriesWithProgress(searchRoot, progress)
 	if err != nil {
 		return nil, fmt.Errorf("查找 Git 仓库失败: %v", err)
 	}
@@ -66,6 +72,11 @@ func ScanIgnoredFiles(searchRoot string, excluder interface{ ShouldExclude(path 
 			}
 
 			if isIgnored {
+				// 应用排除规则
+				if excluder.ShouldExclude(dirPath) {
+					continue
+				}
+
 				// 目录被忽略，标记它和其所有子目录
 				directIgnoredDirs[dirPath] = true
 				ignoredDirs[dirPath] = true
@@ -204,6 +215,13 @@ func ScanIgnoredFiles(searchRoot string, excluder interface{ ShouldExclude(path 
 // findGitRepositories 递归查找指定目录下的所有 Git 仓库
 // 返回所有找到的仓库根目录列表
 func findGitRepositories(root string) ([]string, error) {
+	return findGitRepositoriesWithProgress(root, nil)
+}
+
+// findGitRepositoriesWithProgress 递归查找指定目录下的所有 Git 仓库
+// progress 回调函数会在遍历过程中被调用，传入当前正在扫描的绝对路径
+// 返回所有找到的仓库根目录列表
+func findGitRepositoriesWithProgress(root string, progress func(absPath string)) ([]string, error) {
 	var repos []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -218,6 +236,11 @@ func findGitRepositories(root string) ([]string, error) {
 		// 只处理目录
 		if !info.IsDir() {
 			return nil
+		}
+
+		// 调用进度回调
+		if progress != nil {
+			progress(path)
 		}
 
 		// 检查是否为 Git 仓库

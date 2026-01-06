@@ -12,6 +12,11 @@ type Matcher struct {
 	patterns []string
 }
 
+// Patterns 返回匹配器的模式列表（用于调试）
+func (m *Matcher) Patterns() []string {
+	return m.patterns
+}
+
 // NewMatcher 创建一个新的排除匹配器
 func NewMatcher(patterns []string) (*Matcher, error) {
 	m := &Matcher{
@@ -24,20 +29,27 @@ func NewMatcher(patterns []string) (*Matcher, error) {
 			continue
 		}
 
-		// 归一化路径，并转换为正斜杠格式（doublestar 需要）
-		normalized := filepath.Clean(pattern)
-		normalized = strings.ReplaceAll(normalized, "\\", "/")
+	// 转换为正斜杠格式（doublestar 需要），但不使用 filepath.Clean 以避免破坏通配符
+	normalized := strings.ReplaceAll(pattern, "\\", "/")
 
-		// 处理相对路径模式
-		if !m.isAbsolutePathPattern(normalized) {
-			// 对于目录匹配模式，确保匹配该目录及其子目录
-			if strings.Contains(normalized, "**") {
-				// 如果已经包含 **，保持不变
-			} else {
-				// 添加 **/ 前缀和 /** 后缀，使其匹配任何路径中包含该目录的情况
-				normalized = "**/" + normalized + "/**"
+	// 处理相对路径模式
+	if !m.isAbsolutePathPattern(normalized) {
+		// 检查是否包含通配符
+		hasWildcard := strings.Contains(normalized, "*") || strings.Contains(normalized, "?") || strings.Contains(normalized, "[")
+		if hasWildcard {
+			// 对于包含通配符的模式，如果是简单的目录匹配模式（如 */vendor/*），转换为 **/vendor/**
+			if m.isSimpleDirPattern(normalized) {
+				// 提取目录名，如从 */vendor/* 提取 vendor
+				dirName := m.extractDirFromPattern(normalized)
+				if dirName != "" {
+					normalized = "**/" + dirName + "/**"
+				}
 			}
+		} else {
+			// 对于不包含通配符的相对路径模式，添加 **/ 前缀和 /** 后缀，使其匹配任何路径中包含该目录的情况
+			normalized = "**/" + normalized + "/**"
 		}
+	}
 
 		m.patterns = append(m.patterns, normalized)
 	}
@@ -115,4 +127,32 @@ func (m *Matcher) matchesAbsolutePath(path, pattern string) bool {
 
 	// 检查路径是否以前缀模式开头
 	return strings.HasPrefix(pathLower, patternLower)
+}
+
+// isSimpleDirPattern 检查是否为简单的目录匹配模式（如 */vendor/* 或 vendor）
+func (m *Matcher) isSimpleDirPattern(pattern string) bool {
+	// 检查模式是否为 */dirname/* 或 */dirname 格式
+	if strings.HasPrefix(pattern, "*/") {
+		remaining := strings.TrimPrefix(pattern, "*/")
+		if strings.HasSuffix(remaining, "/*") {
+			dirName := strings.TrimSuffix(remaining, "/*")
+			return dirName != "" && !strings.Contains(dirName, "*") && !strings.Contains(dirName, "?") && !strings.Contains(dirName, "[")
+		}
+		if !strings.Contains(remaining, "*") && !strings.Contains(remaining, "?") && !strings.Contains(remaining, "[") {
+			return remaining != ""
+		}
+	}
+	return false
+}
+
+// extractDirFromPattern 从简单目录模式中提取目录名
+func (m *Matcher) extractDirFromPattern(pattern string) string {
+	if strings.HasPrefix(pattern, "*/") {
+		remaining := strings.TrimPrefix(pattern, "*/")
+		if strings.HasSuffix(remaining, "/*") {
+			return strings.TrimSuffix(remaining, "/*")
+		}
+		return remaining
+	}
+	return ""
 }
