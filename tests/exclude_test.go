@@ -1,9 +1,11 @@
 package tests
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/aogg/copy-ignore/src/exclude"
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 func TestExcludeMatcher(t *testing.T) {
@@ -76,6 +78,24 @@ func TestExcludeMatcher(t *testing.T) {
 			path:     "C:\\file.log",
 			expected: true,
 		},
+		{
+			name:     "星号斜杠星号模式匹配单层子目录文件",
+			patterns: []string{"*/*.log"},
+			path:     "project\\debug.log",
+			expected: true,
+		},
+		{
+			name:     "星号斜杠星号模式不匹配根目录文件",
+			patterns: []string{"*/*.log"},
+			path:     "debug.log",
+			expected: false,
+		},
+		{
+			name:     "星号斜杠星号模式不匹配深层目录文件",
+			patterns: []string{"*/*.log"},
+			path:     "project\\subdir\\debug.log",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -87,8 +107,8 @@ func TestExcludeMatcher(t *testing.T) {
 
 			result := matcher.ShouldExclude(tt.path)
 			if result != tt.expected {
-				t.Errorf("期望 %v，得到 %v，路径: %s，模式: %v",
-					tt.expected, result, tt.path, tt.patterns)
+				t.Errorf("期望 %v，得到 %v，路径: %s，模式: %v, 处理后模式: %v",
+					tt.expected, result, tt.path, tt.patterns, matcher.Patterns())
 			}
 		})
 	}
@@ -135,6 +155,35 @@ func TestExcludeMatcher_WindowsPaths(t *testing.T) {
 					tt.expected, result, tt.path, tt.patterns)
 			}
 		})
+	}
+}
+
+func TestDebugDoublestar(t *testing.T) {
+	// 调试 doublestar 匹配行为
+	testCases := []struct {
+		pattern, path string
+		expected      bool
+	}{
+		{"*", "file.log", true},
+		{"*.log", "file.log", true},
+		{"*/*.log", "dir/file.log", true},
+		{"*/*.log", "file.log", false},
+		{"*/*.log", "dir/subdir/file.log", false},
+		{"*/*.log", "project/debug.log", false},
+		{"*/*.log", "project/subdir/debug.log", true},
+	}
+
+	for _, tc := range testCases {
+		matched, err := doublestar.Match(tc.pattern, tc.path)
+		if err != nil {
+			t.Errorf("模式 %s 匹配路径 %s 时出错: %v", tc.pattern, tc.path, err)
+			continue
+		}
+		if matched != tc.expected {
+			t.Errorf("模式 %s 匹配路径 %s: 期望 %v, 得到 %v", tc.pattern, tc.path, tc.expected, matched)
+		} else {
+			fmt.Printf("✓ 模式 %s 匹配路径 %s: %v\n", tc.pattern, tc.path, matched)
+		}
 	}
 }
 
