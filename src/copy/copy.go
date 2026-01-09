@@ -14,7 +14,7 @@ import (
 
 // CopyResult 复制操作的结果统计
 type CopyResult struct {
-	Copied int // 实际复制的文件数
+	Copied  int // 实际复制的文件数
 	Skipped int // 跳过的文件数（目标文件较新或相同）
 	Errors  int // 复制出错的文件数
 }
@@ -75,9 +75,9 @@ func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int
 	for _, file := range files {
 		destPath := filepath.Join(destRoot, file.RelativePath)
 		jobs <- copyJob{
-			srcPath: file.AbsPath,
+			srcPath:  file.AbsPath,
 			destPath: destPath,
-			verbose: verbose,
+			verbose:  verbose,
 		}
 	}
 	close(jobs)
@@ -148,9 +148,9 @@ func CopyFilesStreamWithProgress(
 		for file := range fileChan {
 			destPath := filepath.Join(destRoot, file.RelativePath)
 			jobs <- copyJob{
-				srcPath: file.AbsPath,
+				srcPath:  file.AbsPath,
 				destPath: destPath,
-				verbose: verbose,
+				verbose:  verbose,
 			}
 			fileCount++
 			result.SetTotal(fileCount)
@@ -247,7 +247,7 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 	if err == nil {
 		// 目标文件存在，比较修改时间
 		if srcInfo.ModTime().Before(destInfo.ModTime()) ||
-		   srcInfo.ModTime().Equal(destInfo.ModTime()) {
+			srcInfo.ModTime().Equal(destInfo.ModTime()) {
 			// 源文件不比目标文件新，跳过复制
 			if verbose {
 				fmt.Printf("跳过 (目标较新): %s\n", srcPath)
@@ -295,7 +295,7 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 	}
 
 	if verbose {
-		fmt.Printf("已复制: %s -> %s\n", srcPath, destPath)
+		fmt.Printf("已复制-onProgress: %s -> %s\n", srcPath, destPath)
 	}
 
 	return false, nil
