@@ -14,9 +14,10 @@ import (
 
 // CopyResult 复制操作的结果统计
 type CopyResult struct {
-	Copied  int // 实际复制的文件数
-	Skipped int // 跳过的文件数（目标文件较新或相同）
-	Errors  int // 复制出错的文件数
+	Copied  int      // 实际复制的文件数
+	Skipped int      // 跳过的文件数（目标文件较新或相同）
+	Errors  int      // 复制出错的文件数
+	Logs    []string // 复制日志（延迟输出）
 }
 
 // RealTimeCopyResult 支持实时统计的复制结果
@@ -119,6 +120,8 @@ func CopyFilesStreamWithProgress(
 ) (*CopyResult, error) {
 
 	result := &RealTimeCopyResult{}
+	var logMutex sync.Mutex
+	var logs []string
 
 	// 创建工作池，使用更大的缓冲区避免死锁
 	jobs := make(chan copyJob, 1000)
@@ -151,6 +154,11 @@ func CopyFilesStreamWithProgress(
 				srcPath:  file.AbsPath,
 				destPath: destPath,
 				verbose:  verbose,
+				logWriter: func(msg string) {
+					logMutex.Lock()
+					logs = append(logs, msg)
+					logMutex.Unlock()
+				},
 			}
 			fileCount++
 			result.SetTotal(fileCount)
@@ -203,14 +211,16 @@ func CopyFilesStreamWithProgress(
 		Copied:  finalCopied,
 		Skipped: finalSkipped,
 		Errors:  finalErrors,
+		Logs:    logs,
 	}, nil
 }
 
 // copyJob 表示单个复制任务
 type copyJob struct {
-	srcPath  string
-	destPath string
-	verbose  bool
+	srcPath   string
+	destPath  string
+	verbose   bool
+	logWriter func(string)
 }
 
 // copyResult 表示复制任务的结果
@@ -224,7 +234,7 @@ type copyResult struct {
 // copyWorker 执行复制工作的协程
 func copyWorker(jobs <-chan copyJob, results chan<- copyResult) {
 	for job := range jobs {
-		skipped, err := copyFile(job.srcPath, job.destPath, job.verbose)
+		skipped, err := copyFile(job.srcPath, job.destPath, job.verbose, job.logWriter)
 		results <- copyResult{
 			srcPath:  job.srcPath,
 			destPath: job.destPath,
@@ -235,7 +245,7 @@ func copyWorker(jobs <-chan copyJob, results chan<- copyResult) {
 }
 
 // copyFile 复制单个文件，如果目标文件存在且较新则跳过
-func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) {
+func copyFile(srcPath, destPath string, verbose bool, logWriter func(string)) (skipped bool, err error) {
 	// 获取源文件信息
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
@@ -250,7 +260,7 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 			srcInfo.ModTime().Equal(destInfo.ModTime()) {
 			// 源文件不比目标文件新，跳过复制
 			if verbose {
-				fmt.Printf("跳过 (目标较新): %s\n", srcPath)
+				logWriter(fmt.Sprintf("跳过 (目标较新): %s", srcPath))
 			}
 			return true, nil
 		}
@@ -261,7 +271,7 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 
 	// 如果是目录，递归复制整个目录
 	if srcInfo.IsDir() {
-		return copyDir(srcPath, destPath, verbose)
+		return copyDir(srcPath, destPath, verbose, logWriter)
 	}
 
 	// 需要复制：创建目标目录
@@ -295,7 +305,7 @@ func copyFile(srcPath, destPath string, verbose bool) (skipped bool, err error) 
 	}
 
 	if verbose {
-		fmt.Printf("已复制-onProgress: %s -> %s\n", srcPath, destPath)
+		logWriter(fmt.Sprintf("已复制: %s -> %s", srcPath, destPath))
 	}
 
 	return false, nil
@@ -325,7 +335,7 @@ func copyFileContent(srcPath, destPath string) error {
 }
 
 // copyDir 递归复制目录
-func copyDir(srcPath, destPath string, verbose bool) (skipped bool, err error) {
+func copyDir(srcPath, destPath string, verbose bool, logWriter func(string)) (skipped bool, err error) {
 	// 创建目标目录
 	if err := os.MkdirAll(destPath, 0755); err != nil {
 		return false, fmt.Errorf("创建目标目录失败: %v", err)
@@ -344,19 +354,19 @@ func copyDir(srcPath, destPath string, verbose bool) (skipped bool, err error) {
 
 		if entry.IsDir() {
 			// 递归复制子目录
-			if _, err := copyDir(srcEntryPath, destEntryPath, verbose); err != nil {
+			if _, err := copyDir(srcEntryPath, destEntryPath, verbose, logWriter); err != nil {
 				return false, fmt.Errorf("复制子目录失败 %s: %v", srcEntryPath, err)
 			}
 		} else {
 			// 复制文件
-			if _, err := copyFile(srcEntryPath, destEntryPath, verbose); err != nil {
+			if _, err := copyFile(srcEntryPath, destEntryPath, verbose, logWriter); err != nil {
 				return false, fmt.Errorf("复制文件失败 %s: %v", srcEntryPath, err)
 			}
 		}
 	}
 
 	if verbose {
-		fmt.Printf("已复制目录: %s -> %s\n", srcPath, destPath)
+		logWriter(fmt.Sprintf("已复制目录: %s -> %s", srcPath, destPath))
 	}
 
 	return false, nil
