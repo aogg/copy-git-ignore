@@ -135,7 +135,7 @@ func main() {
 			// 每500ms最多输出一次，或者在路径发生变化时
 			if now.Sub(lastOutputTime) > 500*time.Millisecond || src != lastSrc || dest != lastDest {
 				if src != "" && dest != "" {
-					fmt.Printf("\r已复制: %s -> %s\n", src, dest)
+					fmt.Printf("\r已复制-onProgress: %s -> %s\n", src, dest)
 				}
 				fmt.Printf("\r进度: %d/%d 已复制, %d 跳过, %d 出错", copied, total, skipped, errors)
 				lastOutputTime = now
