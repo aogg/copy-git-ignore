@@ -286,7 +286,7 @@ func TestCopyFilesStreamWithProgress_EmptyChannel(t *testing.T) {
 		progressCalled = true
 	}
 
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
 	if err != nil {
 		t.Fatalf("流式复制空channel失败: %v", err)
 	}
@@ -329,18 +329,18 @@ func TestCopyFilesStreamWithProgress_SingleFile(t *testing.T) {
 
 	var progressCalls []struct {
 		copied, skipped, errors, total int
-		src, dest                     string
+		src, dest                      string
 	}
 
 	onProgress := func(copied, skipped, errors, total int, lastSrc, lastDest string) {
 		progressCalls = append(progressCalls, struct {
 			copied, skipped, errors, total int
-			src, dest                     string
+			src, dest                      string
 		}{copied, skipped, errors, total, lastSrc, lastDest})
 	}
 
 	// 执行流式复制
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
 	if err != nil {
 		t.Fatalf("流式复制失败: %v", err)
 	}
@@ -394,18 +394,18 @@ func TestCopyFilesStreamWithProgress_ErrorHandling(t *testing.T) {
 
 	var progressCalls []struct {
 		copied, skipped, errors, total int
-		src, dest                     string
+		src, dest                      string
 	}
 
 	onProgress := func(copied, skipped, errors, total int, lastSrc, lastDest string) {
 		progressCalls = append(progressCalls, struct {
 			copied, skipped, errors, total int
-			src, dest                     string
+			src, dest                      string
 		}{copied, skipped, errors, total, lastSrc, lastDest})
 	}
 
 	// 执行流式复制
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
 	if err != nil {
 		t.Fatalf("流式复制失败: %v", err)
 	}

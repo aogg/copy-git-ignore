@@ -16,12 +16,15 @@ import (
 
 // Config 包含程序的所有配置
 type Config struct {
-	SearchRoot  string   // 开始搜索的根目录
-	BackupRoot  string   // 备份目标根目录
-	Excludes    []string // 排除模式列表
-	DryRun      bool     // 仅显示要复制的文件，不实际复制
-	Concurrency int      // 并行复制的并发数
-	Verbose     bool     // 详细输出
+	SearchRoot   string   // 开始搜索的根目录
+	BackupRoot   string   // 备份目标根目录
+	Excludes     []string // 排除模式列表
+	DryRun       bool     // 仅显示要复制的文件，不实际复制
+	Concurrency  int      // 并行复制的并发数
+	Verbose      bool     // 详细输出
+	BackupDirs   []string // 备份目录列表（逗号分隔）
+	BackupKeep   int      // 每个备份目录保留的备份数
+	BackupSubdir string   // 在备份目录下创建的子目录名称
 }
 
 func main() {
@@ -152,6 +155,9 @@ func main() {
 				config.BackupRoot,
 				config.Concurrency,
 				config.Verbose,
+				config.BackupDirs,
+				config.BackupKeep,
+				config.BackupSubdir,
 				onProgress)
 		}()
 
@@ -193,6 +199,8 @@ func parseFlags() *Config {
 	concurrency := flag.Int("concurrency", 8, "并行复制的并发数")
 	verbose := flag.Bool("verbose", false, "显示详细输出")
 	flag.BoolVar(verbose, "v", false, "显示详细输出（简写）")
+	backupKeep := flag.Int("backup-keep", 3, "每个备份目录保留的最近备份数")
+	backupSubdir := flag.String("backup-subdir", "copy-ignore备份", "在备份目录下创建的子目录名称")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "用法: %s [选项] <搜索根目录> <备份根目录>\n\n", os.Args[0])
@@ -201,6 +209,7 @@ func parseFlags() *Config {
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\n示例:\n")
 		fmt.Fprintf(os.Stderr, "  %s --exclude \"C:\\aaa\\qwe\\\" --exclude \"*\\vendor\" C:\\search D:\\backup\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --backup-keep 5 --backup-subdir \"old\" C:\\search D:\\backup\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -212,12 +221,15 @@ func parseFlags() *Config {
 	}
 
 	return &Config{
-		SearchRoot:  args[0],
-		BackupRoot:  args[1],
-		Excludes:    excludes,
-		DryRun:      *dryRun,
-		Concurrency: *concurrency,
-		Verbose:     *verbose,
+		SearchRoot:   args[0],
+		BackupRoot:   args[1],
+		Excludes:     excludes,
+		DryRun:       *dryRun,
+		Concurrency:  *concurrency,
+		Verbose:      *verbose,
+		BackupDirs:   nil,
+		BackupKeep:   *backupKeep,
+		BackupSubdir: *backupSubdir,
 	}
 }
 
@@ -241,9 +253,17 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("备份根目录不是目录: %s", config.BackupRoot)
 	}
 
+	// 将 BackupRoot 添加到备份目录列表，用于备份功能
+	config.BackupDirs = append(config.BackupDirs, config.BackupRoot)
+
 	// 验证并发数
 	if config.Concurrency <= 0 {
 		return fmt.Errorf("并发数必须大于 0")
+	}
+
+	// 验证备份保留数
+	if config.BackupKeep <= 0 {
+		return fmt.Errorf("备份保留数必须大于 0")
 	}
 
 	// 归一化路径

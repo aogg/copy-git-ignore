@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aogg/copy-ignore/src/helpers"
 	"github.com/aogg/copy-ignore/src/scanner"
 )
 
@@ -111,6 +112,9 @@ func CopyFilesStreamWithProgress(
 	destRoot string,
 	concurrency int,
 	verbose bool,
+	backupDirs []string,
+	backupKeep int,
+	backupSubdir string,
 	onProgress func(copied, skipped, errors, total int, lastSrc, lastDest string), // 进度回调
 ) (*CopyResult, error) {
 
@@ -139,6 +143,8 @@ func CopyFilesStreamWithProgress(
 	// 从文件channel接收并发送到jobs，同时更新总数
 	go func() {
 		fileCount := 0
+		targetPaths := make(map[string]string) // destPath -> srcPath，用于备份检查
+
 		for file := range fileChan {
 			destPath := filepath.Join(destRoot, file.RelativePath)
 			jobs <- copyJob{
@@ -148,7 +154,26 @@ func CopyFilesStreamWithProgress(
 			}
 			fileCount++
 			result.SetTotal(fileCount)
+			targetPaths[destPath] = file.AbsPath
 		}
+
+		// 所有文件收集完毕后，进行备份检查
+		if len(backupDirs) > 0 {
+			for destPath, srcPath := range targetPaths {
+				if err := helpers.BackupPathIfModified(srcPath, destPath, backupDirs, backupKeep, backupSubdir); err != nil {
+					// 备份失败不应该阻止复制，这里只记录错误
+					if verbose {
+						fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
+					}
+				}
+			}
+		}
+
+		// 清理已删除的源文件对应的目标文件
+		if len(backupDirs) > 0 {
+			helpers.CleanupDeletedSrcFiles(destRoot, targetPaths, backupDirs, backupKeep, backupSubdir, verbose)
+		}
+
 		close(jobs)
 	}()
 

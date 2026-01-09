@@ -9,6 +9,7 @@ alwaysApply: true
 - 当前编辑器是windows环境
 - 要访问中国里国外网络要注意配置代理http://localhost_alpine:8899
 - 要访问github.com要注意配置代理https://ghproxy.com/https://github.com/
+- 给的计划必须举例说明
 
 # 对话中计划
 - 作者官网: https://github.com/aogg
@@ -20,10 +21,14 @@ alwaysApply: true
 - main入口文件, 其他文件放src去
 - 工具代码放/src/helpers文件夹，文件名后缀要helper
 - 配置文件放到/configs文件夹
-- 测试文件放/tests
 - 代码生成文件放/runtime
 - 每次新增代码都要判断哪些代码是可写成helper类的，哪些不行
 
+
+### 测试代码
+- 测试文件放/tests，测试代码需要编译生成的文件放/runtime/tests文件夹里
+- 要简化单个测试方法，做到易懂，单个测试方法不能超过20行
+- 测试代码分为准备和执行两个部分，准备部分要另起一个文件，执行部分只通过单一方法调用准备部分
 
 ## 响应语言+
 - 所有回复和注释使用简体中文
