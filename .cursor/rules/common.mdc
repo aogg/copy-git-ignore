@@ -24,6 +24,20 @@ alwaysApply: true
 - 代码生成文件放/runtime
 - 每次新增代码都要判断哪些代码是可写成helper类的，哪些不行
 
+### main/index入口文件
+- 要么叫main，要么叫index。一般index用于web入口，main用于非web入口
+- 如果是新创建的入口文件放到/main文件去，文件后缀根据语言来
+- 入口文件要简单，其他代码放到"/src/其他层"去
+
+### logic层
+- 逻辑代码放/src/logic文件夹，文件名后缀要logic
+- 逻辑代码要写成类，类名后缀要logic
+- logic层的作用是处理业务逻辑，封装度低的写到这块
+
+### libs层
+- 和logic层一样，libs层也是处理业务逻辑，封装度高一些的写到这块
+- libs层的代码要写成类，类名后缀要lib
+- 放到/src/libs文件夹
 
 ### 测试代码
 - 测试文件放/tests，测试代码需要编译生成的文件放/runtime/tests文件夹里
