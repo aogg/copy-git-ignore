@@ -7,19 +7,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"github.com/aogg/copy-ignore/src/config"
 )
 
 // CleanupDeletedSrcFiles 清理已删除的源文件对应的目标文件
-// destRoot: 目标根目录
 // targetPaths: 当前扫描到的目标文件路径集合 (destPath -> srcPath)
-// backupDirs: 备份目录列表
-// keep: 每个备份目录保留的备份数
-// backupSubdir: 在备份目录下创建的子目录名称（需要排除）
-// verbose: 是否输出详细信息
-func CleanupDeletedSrcFiles(destRoot string, targetPaths map[string]string, backupDirs []string, keep int, backupSubdir string, verbose bool) {
+func CleanupDeletedSrcFiles(targetPaths map[string]string) {
+
+	if config.GetGlobalConfig().Verbose {
+		fmt.Printf("开始CleanupDeletedSrcFiles: %s\n", len(targetPaths))
+	}
+
+	cfg := config.GetGlobalConfig()
 	// 遍历目标根目录
-	err := filepath.Walk(destRoot, func(destPath string, info os.FileInfo, err error) error {
+	pathHandleHistoryDir := cfg.HandleHistoryDir(cfg.BackupRoot)
+
+	err := filepath.Walk(cfg.BackupRoot, func(destPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -27,15 +31,11 @@ func CleanupDeletedSrcFiles(destRoot string, targetPaths map[string]string, back
 		// 跳过目录，只处理文件
 		if info.IsDir() {
 			// 检查是否是备份子目录，如果是则跳过整个目录
-			if backupSubdir != "" {
-				relPath, err := filepath.Rel(destRoot, destPath)
-				if err == nil {
-					// 检查路径的第一部分是否是 backupSubdir
-					// 分割路径并检查第一个组件
-					pathParts := strings.Split(filepath.ToSlash(relPath), "/")
-					if len(pathParts) > 0 && pathParts[0] == backupSubdir {
-						return filepath.SkipDir
-					}
+			// 排除历史记录目录及其子目录
+			if pathHandleHistoryDir != "" {
+				// 检查 destPath 是否是 pathHandleHistoryDir 的子孙地址或相等
+				if destPath == pathHandleHistoryDir || strings.HasPrefix(destPath, pathHandleHistoryDir+string(filepath.Separator)) {
+					return filepath.SkipDir
 				}
 			}
 			return nil
@@ -48,52 +48,59 @@ func CleanupDeletedSrcFiles(destRoot string, targetPaths map[string]string, back
 			return nil
 		}
 
+		// 检查文件的父目录是否在 targetPaths 中
+		// 如果父目录被作为整体复制（如 .vscode 目录），则不应删除其中的文件
+		destDir := filepath.Dir(destPath)
+		_, dirExists := targetPaths[destDir]
+		if dirExists {
+			// 父目录被复制，说明这是目录的一部分，不需要清理
+			return nil
+		}
+
 		// 目标文件不在当前扫描中，说明源文件已被删除
 		// 需要备份并删除目标文件
-		if verbose {
+		if cfg.Verbose {
 			fmt.Printf("检测到源文件已删除，准备备份目标文件: %s\n", destPath)
 		}
 
 		// 计算相对路径
-		relPath, err := filepath.Rel(destRoot, destPath)
+		relPath, err := filepath.Rel(cfg.BackupRoot, destPath)
 		if err != nil {
-			if verbose {
+			if cfg.Verbose {
 				fmt.Fprintf(os.Stderr, "计算相对路径失败 %s: %v\n", destPath, err)
 			}
 			return nil
 		}
 
-		// 生成时间戳
-		timestamp := time.Now().Format("20060102-150405")
+		// 使用全局配置中的时间戳
+		timestamp := cfg.Timestamp
 
 		// 备份并删除目标文件
-		for _, backupDir := range backupDirs {
+		for _, backupDir := range cfg.BackupDirs {
 			if backupDir == "" {
 				continue
 			}
 
 			// 如果指定了备份子目录，则添加到路径中
-			backupBase := backupDir
-			if backupSubdir != "" {
-				backupBase = filepath.Join(backupDir, backupSubdir)
-			}
+			backupBase := cfg.HandleHistoryDir(backupDir)
 
+			if cfg.Verbose {
+				fmt.Printf("备份目标文件: %s -> %s\n", destPath, backupBase)
+			}
 			if err := moveToBackup(destPath, backupBase, relPath, timestamp); err != nil {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
-				}
+				fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
 				continue
 			}
 
 			// 清理旧备份
-			if err := pruneBackups(backupBase, relPath, keep); err != nil {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "清理备份目录失败 %s: %v\n", backupBase, err)
+			if err := pruneBackups(backupBase, relPath, cfg.BackupKeep, cfg.Verbose); err != nil {
+				fmt.Fprintf(os.Stderr, "清理备份目录失败 %s: %v\n", backupBase, err)
+				if cfg.Verbose {
 				}
 			}
 
 			// 备份成功后删除目标文件
-			if verbose {
+			if cfg.Verbose {
 				fmt.Printf("源文件已删除，备份并移除目标文件: %s\n", destPath)
 			}
 			// 只需要在一个备份目录中处理即可，因为目标文件只有一个
@@ -104,7 +111,7 @@ func CleanupDeletedSrcFiles(destRoot string, targetPaths map[string]string, back
 	})
 
 	if err != nil {
-		if verbose {
+		if cfg.Verbose {
 			fmt.Fprintf(os.Stderr, "遍历目标目录失败: %v\n", err)
 		}
 	}
@@ -113,20 +120,19 @@ func CleanupDeletedSrcFiles(destRoot string, targetPaths map[string]string, back
 // BackupPathIfModified 检查目标路径是否被修改，如果被修改则备份到指定的备份目录列表
 // srcPath: 源路径
 // destPath: 目标路径
-// backupDirs: 备份目录列表
-// keep: 每个备份目录保留的备份数
-// backupSubdir: 在备份目录下创建的子目录名称
-func BackupPathIfModified(srcPath, destPath string, backupDirs []string, keep int, backupSubdir string) error {
-	if len(backupDirs) == 0 {
-		return nil // 没有备份目录，直接返回
-	}
+func BackupPathIfModified(srcPath, destPath string) error {
+	cfg := config.GetGlobalConfig()
+
+	//if cfg.Verbose {
+	//	fmt.Printf("开始BackupPathIfModified: %s -> %s\n", srcPath, destPath)
+	//}
 
 	// 检查源文件是否存在
 	_, err := os.Stat(srcPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 源文件不存在，删除目标文件
-			return removeDestIfExists(destPath)
+			return nil // 在后面统一处理删除
 		}
 		return fmt.Errorf("检查源文件失败: %v", err)
 	}
@@ -138,45 +144,37 @@ func BackupPathIfModified(srcPath, destPath string, backupDirs []string, keep in
 	}
 
 	if !modified {
-		return nil // 目标未被修改，无需备份
+		// 目标未被修改，删除目标文件（如果源已删除）
+		_, err := os.Stat(srcPath)
+		if os.IsNotExist(err) {
+			// 源文件不存在，删除目标文件
+			if err := removeDestIfExists(destPath, false); err != nil {
+				return fmt.Errorf("删除目标文件失败: %v", err)
+			}
+		}
+		return nil
 	}
-
-	// 获取相对路径用于备份结构
-	relPath, err := getRelativePath(srcPath, destPath)
-	if err != nil {
-		return fmt.Errorf("获取相对路径失败: %v", err)
-	}
-
-	// 生成时间戳
-	timestamp := time.Now().Format("20060102-150405")
 
 	// 对每个备份目录执行备份
-	for _, backupDir := range backupDirs {
+	for _, backupDir := range cfg.BackupDirs {
 		if backupDir == "" {
 			continue // 跳过空目录
 		}
 
 		// 如果指定了备份子目录，则添加到路径中
-		backupBase := backupDir
-		if backupSubdir != "" {
-			backupBase = filepath.Join(backupDir, backupSubdir)
-		}
+		backupBase := cfg.HandleHistoryDir(backupDir)
 
-		if err := moveToBackup(destPath, backupBase, relPath, timestamp); err != nil {
+		if err := copyRecursive(srcPath, backupBase); err != nil {
 			return fmt.Errorf("备份到目录 %s 失败: %v", backupDir, err)
 		}
 
-		// 清理旧备份
-		if err := pruneBackups(backupBase, relPath, keep); err != nil {
-			return fmt.Errorf("清理备份目录 %s 失败: %v", backupDir, err)
-		}
 	}
 
 	return nil
 }
 
 // removeDestIfExists 如果目标文件存在则删除它
-func removeDestIfExists(destPath string) error {
+func removeDestIfExists(destPath string, verbose bool) error {
 	if _, err := os.Stat(destPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil // 目标不存在，无需删除
@@ -184,6 +182,9 @@ func removeDestIfExists(destPath string) error {
 		return fmt.Errorf("检查目标文件失败: %v", err)
 	}
 	// 目标存在，删除它
+	if verbose {
+		fmt.Printf("源文件已删除，移除目标文件: %s\n", destPath)
+	}
 	if err := os.RemoveAll(destPath); err != nil {
 		return fmt.Errorf("删除目标文件失败: %v", err)
 	}
@@ -301,6 +302,10 @@ func moveToBackup(src string, destBase string, relPath string, timestamp string)
 	}
 
 	// 尝试使用 os.Rename 进行快速移动（同设备）
+	if config.GetGlobalConfig().Verbose {
+		fmt.Printf("移动--moveToBackup: %s -> %s\n", src, backupTarget)
+	}
+
 	if err := os.Rename(src, backupTarget); err == nil {
 		return nil // 成功移动
 	}
@@ -308,6 +313,10 @@ func moveToBackup(src string, destBase string, relPath string, timestamp string)
 	// Rename失败（可能是跨设备），回退到复制+删除
 	if err := copyRecursive(src, backupTarget); err != nil {
 		return fmt.Errorf("复制到备份目录失败: %v", err)
+	}
+
+	if config.GetGlobalConfig().Verbose {
+		fmt.Printf("删除: %s\n", src)
 	}
 
 	// 删除原目录/文件
@@ -388,7 +397,7 @@ func copyFileContent(src, dest string) error {
 }
 
 // pruneBackups 清理备份，只保留最近的keep个备份
-func pruneBackups(destBase, relPath string, keep int) error {
+func pruneBackups(destBase, relPath string, keep int, verbose bool) error {
 	backupDir := filepath.Join(destBase, relPath)
 
 	// 获取所有时间戳目录
@@ -399,6 +408,9 @@ func pruneBackups(destBase, relPath string, keep int) error {
 
 	// 如果备份数不超过keep，直接返回
 	if len(timestamps) <= keep {
+		if verbose {
+			fmt.Printf("备份目录 %s 当前备份数 %d，无需清理（保留 %d）\n", backupDir, len(timestamps), keep)
+		}
 		return nil
 	}
 
@@ -408,6 +420,9 @@ func pruneBackups(destBase, relPath string, keep int) error {
 	// 删除超出keep的旧备份
 	for i := keep; i < len(timestamps); i++ {
 		oldBackup := filepath.Join(backupDir, timestamps[i])
+		if verbose {
+			fmt.Printf("删除旧备份: %s\n", oldBackup)
+		}
 		if err := os.RemoveAll(oldBackup); err != nil {
 			return fmt.Errorf("删除旧备份失败 %s: %v", oldBackup, err)
 		}

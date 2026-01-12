@@ -7,8 +7,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aogg/copy-ignore/src/config"
 	"github.com/aogg/copy-ignore/src/helpers"
 )
+
+// setupTestConfig 设置测试用的全局配置
+func setupTestConfig(t *testing.T, backupDirs []string, backupKeep int, backupSubdir string) {
+	cfg := &config.Config{
+		BackupDirs:   backupDirs,
+		BackupKeep:   backupKeep,
+		BackupSubdir: backupSubdir,
+		Verbose:      false,
+	}
+	config.InitGlobalConfig(cfg)
+}
 
 // TestBackupPathIfModified_NoBackupNeeded 测试无需备份的情况
 func TestBackupPathIfModified_NoBackupNeeded(t *testing.T) {
@@ -16,6 +28,8 @@ func TestBackupPathIfModified_NoBackupNeeded(t *testing.T) {
 	srcDir := filepath.Join(tempDir, "src")
 	destDir := filepath.Join(tempDir, "dest")
 	backupDir := filepath.Join(tempDir, "backup")
+
+	setupTestConfig(t, []string{backupDir}, 3, "")
 
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
@@ -27,7 +41,7 @@ func TestBackupPathIfModified_NoBackupNeeded(t *testing.T) {
 	}
 
 	// 目标不存在，应该无需备份
-	err := helpers.BackupPathIfModified(srcFile, destDir, []string{backupDir}, 3, "")
+	err := helpers.BackupPathIfModified(srcFile, destDir)
 	if err != nil {
 		t.Errorf("目标不存在时备份失败: %v", err)
 	}
@@ -48,6 +62,8 @@ func TestBackupPathIfModified_BackupNeeded(t *testing.T) {
 	srcDir := filepath.Join(tempDir, "src")
 	destDir := filepath.Join(tempDir, "dest")
 	backupDir := filepath.Join(tempDir, "backup")
+
+	setupTestConfig(t, []string{backupDir}, 3, "")
 
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
@@ -75,7 +91,7 @@ func TestBackupPathIfModified_BackupNeeded(t *testing.T) {
 	}
 
 	// 执行备份
-	err := helpers.BackupPathIfModified(srcFile, destFile, []string{backupDir}, 3, "")
+	err := helpers.BackupPathIfModified(srcFile, destFile)
 	if err != nil {
 		t.Errorf("备份失败: %v", err)
 	}
@@ -113,6 +129,8 @@ func TestBackupPathIfModified_MultipleBackupDirs(t *testing.T) {
 	backupDir1 := filepath.Join(tempDir, "backup1")
 	backupDir2 := filepath.Join(tempDir, "backup2")
 
+	setupTestConfig(t, []string{backupDir1, backupDir2}, 3, "")
+
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
 		t.Fatalf("创建源目录失败: %v", err)
@@ -138,15 +156,14 @@ func TestBackupPathIfModified_MultipleBackupDirs(t *testing.T) {
 		t.Fatalf("修改目标文件时间失败: %v", err)
 	}
 
-	// 执行备份到多个目录
-	backupDirs := []string{backupDir1, backupDir2}
-	err := helpers.BackupPathIfModified(srcFile, destFile, backupDirs, 3, "")
+	// 执行备份
+	err := helpers.BackupPathIfModified(srcFile, destFile)
 	if err != nil {
 		t.Errorf("多目录备份失败: %v", err)
 	}
 
 	// 检查两个备份目录都创建了备份
-	for _, backupDir := range backupDirs {
+	for _, backupDir := range []string{backupDir1, backupDir2} {
 		entries, err := os.ReadDir(backupDir)
 		if err != nil {
 			t.Fatalf("读取备份目录 %s 失败: %v", backupDir, err)
@@ -163,6 +180,8 @@ func TestBackupPathIfModified_BackupRotation(t *testing.T) {
 	srcDir := filepath.Join(tempDir, "src")
 	destDir := filepath.Join(tempDir, "dest")
 	backupDir := filepath.Join(tempDir, "backup")
+
+	setupTestConfig(t, []string{backupDir}, 3, "")
 
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
@@ -194,7 +213,7 @@ func TestBackupPathIfModified_BackupRotation(t *testing.T) {
 		}
 
 		// 执行备份
-		err := helpers.BackupPathIfModified(srcFile, destFile, []string{backupDir}, 3, "")
+		err := helpers.BackupPathIfModified(srcFile, destFile)
 		if err != nil {
 			t.Errorf("备份 %d 失败: %v", i, err)
 		}
@@ -227,6 +246,8 @@ func TestBackupPathIfModified_DirectoryBackup(t *testing.T) {
 	srcDir := filepath.Join(tempDir, "src")
 	destDir := filepath.Join(tempDir, "dest")
 	backupDir := filepath.Join(tempDir, "backup")
+
+	setupTestConfig(t, []string{backupDir}, 3, "")
 
 	// 创建源目录结构
 	if err := os.MkdirAll(filepath.Join(srcDir, "subdir"), 0755); err != nil {
@@ -262,7 +283,7 @@ func TestBackupPathIfModified_DirectoryBackup(t *testing.T) {
 	}
 
 	// 执行目录备份
-	err := helpers.BackupPathIfModified(srcDir, destDir, []string{backupDir}, 3, "")
+	err := helpers.BackupPathIfModified(srcDir, destDir)
 	if err != nil {
 		t.Errorf("目录备份失败: %v", err)
 	}
@@ -316,6 +337,8 @@ func TestBackupPathIfModified_EmptyBackupDirs(t *testing.T) {
 	srcDir := filepath.Join(tempDir, "src")
 	destDir := filepath.Join(tempDir, "dest")
 
+	setupTestConfig(t, []string{}, 3, "")
+
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
 		t.Fatalf("创建源目录失败: %v", err)
@@ -342,7 +365,7 @@ func TestBackupPathIfModified_EmptyBackupDirs(t *testing.T) {
 	}
 
 	// 使用空备份目录列表
-	err := helpers.BackupPathIfModified(srcFile, destFile, []string{}, 3, "")
+	err := helpers.BackupPathIfModified(srcFile, destFile)
 	if err != nil {
 		t.Errorf("空备份目录列表应该成功但失败: %v", err)
 	}

@@ -106,11 +106,11 @@ func createGitignore(t *testing.T, repo, content string) {
 // createIgnoredFiles 创建被忽略的文件
 func createIgnoredFiles(t *testing.T, repo string) {
 	files := map[string]string{
-		"debug.log":     "这是一些调试日志",
-		"temp.tmp":      "临时文件内容",
-		"vendor/lib.a":  "库文件",
-		"app.bak":       "备份文件",
-		"build/output":  "构建输出",
+		"debug.log":    "这是一些调试日志",
+		"temp.tmp":     "临时文件内容",
+		"vendor/lib.a": "库文件",
+		"app.bak":      "备份文件",
+		"build/output": "构建输出",
 	}
 
 	for relPath, content := range files {
@@ -153,9 +153,9 @@ func testCopyWithoutExcludes(t *testing.T, searchRoot, backupRoot string) {
 	// repo2根目录有1个文件，保留；build目录被忽略，作为目录保留
 	expectedFiles := map[string]bool{
 		"repo1":         true, // 替换了debug.log和temp.tmp
-		"repo1/vendor": true, // vendor目录被忽略
-		"repo2/app.bak":     true, // repo2根目录只有一个文件
-		"repo2/build":  true, // build目录被忽略
+		"repo1/vendor":  true, // vendor目录被忽略
+		"repo2/app.bak": true, // repo2根目录只有一个文件
+		"repo2/build":   true, // build目录被忽略
 	}
 
 	foundFiles := make(map[string]bool)
@@ -175,7 +175,7 @@ func testCopyWithoutExcludes(t *testing.T, searchRoot, backupRoot string) {
 	}
 
 	// 执行复制
-	result, err := copy.CopyFiles(files, backupRoot, 2, false)
+	result, err := copy.CopyFiles(files, backupRoot, 2, false, excluder)
 	if err != nil {
 		t.Fatalf("复制失败: %v", err)
 	}
@@ -220,7 +220,7 @@ func testCopyWithExcludes(t *testing.T, searchRoot, backupRoot string) {
 	}
 
 	// 执行复制
-	result, err := copy.CopyFiles(files, backupRoot, 2, false)
+	result, err := copy.CopyFiles(files, backupRoot, 2, false, excluder)
 	if err != nil {
 		t.Fatalf("复制失败: %v", err)
 	}
@@ -243,13 +243,13 @@ func testIncrementalCopy(t *testing.T, searchRoot, backupRoot string) {
 	}
 
 	// 第一次复制
-	_, err = copy.CopyFiles(files, backupRoot, 2, false)
+	_, err = copy.CopyFiles(files, backupRoot, 2, false, excluder)
 	if err != nil {
 		t.Fatalf("第一次复制失败: %v", err)
 	}
 
 	// 再次复制（应该是增量复制，所有文件应该被跳过）
-	result2, err := copy.CopyFiles(files, backupRoot, 2, false)
+	result2, err := copy.CopyFiles(files, backupRoot, 2, false, excluder)
 	if err != nil {
 		t.Fatalf("第二次复制失败: %v", err)
 	}
@@ -273,7 +273,7 @@ func testIncrementalCopy(t *testing.T, searchRoot, backupRoot string) {
 		}
 
 		// 再次复制，应该只复制那个文件
-		result3, err := copy.CopyFiles([]scanner.IgnoredFileInfo{files[0]}, backupRoot, 2, false)
+		result3, err := copy.CopyFiles([]scanner.IgnoredFileInfo{files[0]}, backupRoot, 2, false, excluder)
 		if err != nil {
 			t.Fatalf("第三次复制失败: %v", err)
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aogg/copy-ignore/src/config"
 	"github.com/aogg/copy-ignore/src/copy"
 	"github.com/aogg/copy-ignore/src/scanner"
 )
@@ -14,7 +15,7 @@ func TestCopyFiles_EmptyList(t *testing.T) {
 	tempDir := t.TempDir()
 	backupRoot := filepath.Join(tempDir, "backup")
 
-	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{}, backupRoot, 2, false)
+	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("复制空列表失败: %v", err)
 	}
@@ -48,7 +49,7 @@ func TestCopyFiles_SingleFile(t *testing.T) {
 	}
 
 	// 执行复制
-	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("复制失败: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestCopyFiles_IncrementalCopy_SkipNewer(t *testing.T) {
 	}
 
 	// 第一次复制
-	_, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	_, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("第一次复制失败: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestCopyFiles_IncrementalCopy_SkipNewer(t *testing.T) {
 	}
 
 	// 第二次复制（增量复制）
-	result2, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	result2, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("第二次复制失败: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestCopyFiles_IncrementalCopy_UpdateOlder(t *testing.T) {
 	}
 
 	// 第一次复制
-	_, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	_, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("第一次复制失败: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestCopyFiles_IncrementalCopy_UpdateOlder(t *testing.T) {
 	}
 
 	// 第二次复制
-	result2, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	result2, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("第二次复制失败: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestCopyFiles_NestedDirectories(t *testing.T) {
 	}
 
 	// 执行复制
-	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("复制失败: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestCopyFiles_SourceNotExist(t *testing.T) {
 		RepoRoot:     tempDir,
 	}
 
-	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false)
+	result, err := copy.CopyFiles([]scanner.IgnoredFileInfo{fileInfo}, backupRoot, 2, false, nil)
 	if err != nil {
 		t.Fatalf("复制失败: %v", err)
 	}
@@ -275,8 +276,11 @@ func TestCopyFiles_SourceNotExist(t *testing.T) {
 }
 
 func TestCopyFilesStreamWithProgress_EmptyChannel(t *testing.T) {
-	tempDir := t.TempDir()
-	backupRoot := filepath.Join(tempDir, "backup")
+	// 初始化全局配置
+	config.InitGlobalConfig(&config.Config{
+		BackupDirs: []string{},
+		BackupKeep: 3,
+	})
 
 	fileChan := make(chan scanner.IgnoredFileInfo, 1)
 	close(fileChan) // 空channel
@@ -286,7 +290,7 @@ func TestCopyFilesStreamWithProgress_EmptyChannel(t *testing.T) {
 		progressCalled = true
 	}
 
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, onProgress, nil)
 	if err != nil {
 		t.Fatalf("流式复制空channel失败: %v", err)
 	}
@@ -304,6 +308,14 @@ func TestCopyFilesStreamWithProgress_SingleFile(t *testing.T) {
 	tempDir := t.TempDir()
 	srcDir := filepath.Join(tempDir, "src")
 	backupRoot := filepath.Join(tempDir, "backup")
+
+	// 初始化全局配置
+	config.InitGlobalConfig(&config.Config{
+		BackupRoot:  backupRoot,
+		BackupDirs:  []string{backupRoot},
+		BackupKeep:  3,
+		Concurrency: 2,
+	})
 
 	// 创建源文件
 	if err := os.MkdirAll(srcDir, 0755); err != nil {
@@ -340,7 +352,7 @@ func TestCopyFilesStreamWithProgress_SingleFile(t *testing.T) {
 	}
 
 	// 执行流式复制
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, onProgress, nil)
 	if err != nil {
 		t.Fatalf("流式复制失败: %v", err)
 	}
@@ -381,6 +393,14 @@ func TestCopyFilesStreamWithProgress_ErrorHandling(t *testing.T) {
 	tempDir := t.TempDir()
 	backupRoot := filepath.Join(tempDir, "backup")
 
+	// 初始化全局配置
+	config.InitGlobalConfig(&config.Config{
+		BackupRoot:  backupRoot,
+		BackupDirs:  []string{backupRoot},
+		BackupKeep:  3,
+		Concurrency: 2,
+	})
+
 	fileChan := make(chan scanner.IgnoredFileInfo, 1)
 
 	// 创建不存在的源文件信息
@@ -405,7 +425,7 @@ func TestCopyFilesStreamWithProgress_ErrorHandling(t *testing.T) {
 	}
 
 	// 执行流式复制
-	result, err := copy.CopyFilesStreamWithProgress(fileChan, backupRoot, 2, false, []string{}, 3, "", onProgress)
+	result, err := copy.CopyFilesStreamWithProgress(fileChan, onProgress, nil)
 	if err != nil {
 		t.Fatalf("流式复制失败: %v", err)
 	}

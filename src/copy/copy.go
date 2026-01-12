@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aogg/copy-ignore/src/config"
+	"github.com/aogg/copy-ignore/src/exclude"
 	"github.com/aogg/copy-ignore/src/helpers"
 	"github.com/aogg/copy-ignore/src/scanner"
 )
@@ -53,7 +55,7 @@ func (r *RealTimeCopyResult) SetTotal(total int) {
 }
 
 // CopyFiles 并行复制文件列表到指定目录
-func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int, verbose bool) (*CopyResult, error) {
+func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int, verbose bool, excluder *exclude.Matcher) (*CopyResult, error) {
 	if len(files) == 0 {
 		return &CopyResult{}, nil
 	}
@@ -68,7 +70,7 @@ func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			copyWorker(jobs, results)
+			copyWorker(jobs, results, excluder)
 		}()
 	}
 
@@ -110,14 +112,10 @@ func CopyFiles(files []scanner.IgnoredFileInfo, destRoot string, concurrency int
 // CopyFilesStreamWithProgress 从channel接收文件并异步复制，支持实时进度反馈
 func CopyFilesStreamWithProgress(
 	fileChan <-chan scanner.IgnoredFileInfo,
-	destRoot string,
-	concurrency int,
-	verbose bool,
-	backupDirs []string,
-	backupKeep int,
-	backupSubdir string,
 	onProgress func(copied, skipped, errors, total int, lastSrc, lastDest string), // 进度回调
+	excluder *exclude.Matcher,
 ) (*CopyResult, error) {
+	cfg := config.GetGlobalConfig()
 
 	result := &RealTimeCopyResult{}
 	var logMutex sync.Mutex
@@ -129,11 +127,11 @@ func CopyFilesStreamWithProgress(
 
 	// 启动工作协程
 	var wg sync.WaitGroup
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < cfg.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			copyWorker(jobs, results)
+			copyWorker(jobs, results, excluder)
 		}()
 	}
 
@@ -149,11 +147,11 @@ func CopyFilesStreamWithProgress(
 		targetPaths := make(map[string]string) // destPath -> srcPath，用于备份检查
 
 		for file := range fileChan {
-			destPath := filepath.Join(destRoot, file.RelativePath)
+			destPath := filepath.Join(cfg.BackupRoot, file.RelativePath)
 			jobs <- copyJob{
 				srcPath:  file.AbsPath,
 				destPath: destPath,
-				verbose:  verbose,
+				verbose:  cfg.Verbose,
 				logWriter: func(msg string) {
 					logMutex.Lock()
 					logs = append(logs, msg)
@@ -166,11 +164,11 @@ func CopyFilesStreamWithProgress(
 		}
 
 		// 所有文件收集完毕后，进行备份检查
-		if len(backupDirs) > 0 {
+		if len(cfg.BackupDirs) > 0 {
 			for destPath, srcPath := range targetPaths {
-				if err := helpers.BackupPathIfModified(srcPath, destPath, backupDirs, backupKeep, backupSubdir); err != nil {
+				if err := helpers.BackupPathIfModified(srcPath, destPath); err != nil {
 					// 备份失败不应该阻止复制，这里只记录错误
-					if verbose {
+					if cfg.Verbose {
 						fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
 					}
 				}
@@ -178,8 +176,8 @@ func CopyFilesStreamWithProgress(
 		}
 
 		// 清理已删除的源文件对应的目标文件
-		if len(backupDirs) > 0 {
-			helpers.CleanupDeletedSrcFiles(destRoot, targetPaths, backupDirs, backupKeep, backupSubdir, verbose)
+		if len(cfg.BackupDirs) > 0 {
+			helpers.CleanupDeletedSrcFiles(targetPaths)
 		}
 
 		close(jobs)
@@ -189,7 +187,7 @@ func CopyFilesStreamWithProgress(
 	for res := range results {
 		if res.err != nil {
 			result.AddResult(0, 0, 1)
-			if verbose {
+			if cfg.Verbose {
 				fmt.Fprintf(os.Stderr, "复制失败 %s: %v\n", res.srcPath, res.err)
 			}
 		} else if res.skipped {
@@ -232,9 +230,9 @@ type copyResult struct {
 }
 
 // copyWorker 执行复制工作的协程
-func copyWorker(jobs <-chan copyJob, results chan<- copyResult) {
+func copyWorker(jobs <-chan copyJob, results chan<- copyResult, excluder *exclude.Matcher) {
 	for job := range jobs {
-		skipped, err := copyFile(job.srcPath, job.destPath, job.verbose, job.logWriter)
+		skipped, err := copyFile(job.srcPath, job.destPath, job.verbose, job.logWriter, excluder)
 		results <- copyResult{
 			srcPath:  job.srcPath,
 			destPath: job.destPath,
@@ -245,7 +243,7 @@ func copyWorker(jobs <-chan copyJob, results chan<- copyResult) {
 }
 
 // copyFile 复制单个文件，如果目标文件存在且较新则跳过
-func copyFile(srcPath, destPath string, verbose bool, logWriter func(string)) (skipped bool, err error) {
+func copyFile(srcPath, destPath string, verbose bool, logWriter func(string), excluder *exclude.Matcher) (skipped bool, err error) {
 	// 获取源文件信息
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
@@ -259,9 +257,9 @@ func copyFile(srcPath, destPath string, verbose bool, logWriter func(string)) (s
 		if srcInfo.ModTime().Before(destInfo.ModTime()) ||
 			srcInfo.ModTime().Equal(destInfo.ModTime()) {
 			// 源文件不比目标文件新，跳过复制
-			if verbose {
-				logWriter(fmt.Sprintf("跳过 (目标较新): %s", srcPath))
-			}
+			//if verbose {
+			//	logWriter(fmt.Sprintf("跳过 (目标较新): %s", srcPath))
+			//}
 			return true, nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -271,7 +269,7 @@ func copyFile(srcPath, destPath string, verbose bool, logWriter func(string)) (s
 
 	// 如果是目录，递归复制整个目录
 	if srcInfo.IsDir() {
-		return copyDir(srcPath, destPath, verbose, logWriter)
+		return copyDir(srcPath, destPath, verbose, logWriter, excluder)
 	}
 
 	// 需要复制：创建目标目录
@@ -335,7 +333,7 @@ func copyFileContent(srcPath, destPath string) error {
 }
 
 // copyDir 递归复制目录
-func copyDir(srcPath, destPath string, verbose bool, logWriter func(string)) (skipped bool, err error) {
+func copyDir(srcPath, destPath string, verbose bool, logWriter func(string), excluder *exclude.Matcher) (skipped bool, err error) {
 	// 创建目标目录
 	if err := os.MkdirAll(destPath, 0755); err != nil {
 		return false, fmt.Errorf("创建目标目录失败: %v", err)
@@ -352,22 +350,30 @@ func copyDir(srcPath, destPath string, verbose bool, logWriter func(string)) (sk
 		srcEntryPath := filepath.Join(srcPath, entry.Name())
 		destEntryPath := filepath.Join(destPath, entry.Name())
 
+		// 检查是否应该排除此路径
+		if excluder != nil && excluder.ShouldExclude(srcEntryPath) {
+			if verbose {
+				logWriter(fmt.Sprintf("跳过 (排除规则): %s", srcEntryPath))
+			}
+			continue
+		}
+
 		if entry.IsDir() {
 			// 递归复制子目录
-			if _, err := copyDir(srcEntryPath, destEntryPath, verbose, logWriter); err != nil {
+			if _, err := copyDir(srcEntryPath, destEntryPath, verbose, logWriter, excluder); err != nil {
 				return false, fmt.Errorf("复制子目录失败 %s: %v", srcEntryPath, err)
 			}
 		} else {
 			// 复制文件
-			if _, err := copyFile(srcEntryPath, destEntryPath, verbose, logWriter); err != nil {
+			if _, err := copyFile(srcEntryPath, destEntryPath, verbose, logWriter, excluder); err != nil {
 				return false, fmt.Errorf("复制文件失败 %s: %v", srcEntryPath, err)
 			}
 		}
 	}
 
-	if verbose {
-		logWriter(fmt.Sprintf("已复制目录: %s -> %s", srcPath, destPath))
-	}
+	//if verbose {
+	//	logWriter(fmt.Sprintf("已复制目录: %s -> %s", srcPath, destPath))
+	//}
 
 	return false, nil
 }
