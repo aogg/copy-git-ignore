@@ -16,7 +16,7 @@ import (
 func CleanupDeletedSrcFiles(targetPaths map[string]string) {
 
 	if config.GetGlobalConfig().Verbose {
-		fmt.Printf("开始CleanupDeletedSrcFiles: %s\n", len(targetPaths))
+		fmt.Printf("开始CleanupDeletedSrcFiles: %d\n", len(targetPaths))
 	}
 
 	cfg := config.GetGlobalConfig()
