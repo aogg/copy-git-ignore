@@ -376,6 +376,10 @@ func copyDirRecursive(src, dest string) error {
 
 // copyFileContent 复制文件内容
 func copyFileContent(src, dest string) error {
+	if config.GetGlobalConfig().Verbose {
+		fmt.Fprintf(os.Stdout, "history: 复制文件 %s -> %s\n", src, dest)
+	}
+
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
