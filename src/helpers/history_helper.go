@@ -72,9 +72,6 @@ func CleanupDeletedSrcFiles(targetPaths map[string]string) {
 			return nil
 		}
 
-		// 使用全局配置中的时间戳
-		timestamp := cfg.Timestamp
-
 		// 备份并删除目标文件
 		for _, backupDir := range cfg.BackupDirs {
 			if backupDir == "" {
@@ -87,7 +84,7 @@ func CleanupDeletedSrcFiles(targetPaths map[string]string) {
 			if cfg.Verbose {
 				fmt.Printf("备份目标文件: %s -> %s\n", destPath, backupBase)
 			}
-			if err := moveToBackup(destPath, backupBase, relPath, timestamp); err != nil {
+			if err := moveToBackup(destPath, backupBase, relPath); err != nil {
 				fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
 				continue
 			}
@@ -291,10 +288,10 @@ func getRelativePath(srcPath, destPath string) (string, error) {
 	return rel, nil
 }
 
-// moveToBackup 将目标路径移动到备份目录的时间戳子目录下
-func moveToBackup(src string, destBase string, relPath string, timestamp string) error {
-	// 构造备份目标路径：destBase/timestamp/relPath/
-	backupTarget := filepath.Join(destBase, timestamp, relPath)
+// moveToBackup 将目标路径移动到备份目录
+func moveToBackup(src string, destBase string, relPath string) error {
+	// 构造备份目标路径：destBase/relPath/
+	backupTarget := filepath.Join(destBase, relPath)
 
 	// 确保备份目录存在
 	if err := ensureDir(filepath.Dir(backupTarget)); err != nil {

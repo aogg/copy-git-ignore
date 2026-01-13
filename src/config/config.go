@@ -31,9 +31,11 @@ func GetGlobalConfig() *Config {
 }
 
 func (c *Config) HandleHistoryDir(currentDir string) string {
+	var baseDir string
 	if c.HistoryDir != "" {
-		return c.HistoryDir
+		baseDir = c.HistoryDir
+	} else {
+		baseDir = filepath.Join(currentDir, c.BackupSubdir)
 	}
-
-	return filepath.Join(currentDir, c.BackupSubdir)
+	return filepath.Join(baseDir, c.Timestamp)
 }
