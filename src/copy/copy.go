@@ -144,7 +144,7 @@ func CopyFilesStreamWithProgress(
 	// 从文件channel接收并发送到jobs，同时更新总数
 	go func() {
 		fileCount := 0
-		targetPaths := make(map[string]string) // destPath -> srcPath，用于备份检查
+		targetPaths := make(map[string]string) // destPath -> srcPath，用于清理检查
 
 		for file := range fileChan {
 			destPath := filepath.Join(cfg.BackupRoot, file.RelativePath)
@@ -161,18 +161,6 @@ func CopyFilesStreamWithProgress(
 			fileCount++
 			result.SetTotal(fileCount)
 			targetPaths[destPath] = file.AbsPath
-		}
-
-		// 所有文件收集完毕后，进行备份检查
-		if len(cfg.BackupDirs) > 0 {
-			for destPath, srcPath := range targetPaths {
-				if err := helpers.BackupPathIfModified(srcPath, destPath); err != nil {
-					// 备份失败不应该阻止复制，这里只记录错误
-					if cfg.Verbose {
-						fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
-					}
-				}
-			}
 		}
 
 		// 清理已删除的源文件对应的目标文件
@@ -244,6 +232,8 @@ func copyWorker(jobs <-chan copyJob, results chan<- copyResult, excluder *exclud
 
 // copyFile 复制单个文件，如果目标文件存在且较新则跳过
 func copyFile(srcPath, destPath string, verbose bool, logWriter func(string), excluder *exclude.Matcher) (skipped bool, err error) {
+	cfg := config.GetGlobalConfig()
+
 	// 获取源文件信息
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
@@ -261,6 +251,16 @@ func copyFile(srcPath, destPath string, verbose bool, logWriter func(string), ex
 			//	logWriter(fmt.Sprintf("跳过 (目标较新): %s", srcPath))
 			//}
 			return true, nil
+		}
+
+		// 源文件比目标文件新，需要覆盖，先备份目标文件
+		if len(cfg.BackupDirs) > 0 {
+			if err := helpers.BackupFileBeforeOverwrite(destPath); err != nil {
+				// 备份失败不应该阻止复制，只记录错误
+				if verbose {
+					fmt.Fprintf(os.Stderr, "备份失败 %s: %v\n", destPath, err)
+				}
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		// 其他错误

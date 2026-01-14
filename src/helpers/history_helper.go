@@ -11,6 +11,47 @@ import (
 	"github.com/aogg/copy-ignore/src/config"
 )
 
+// BackupFileBeforeOverwrite 在覆盖文件前备份到历史文件夹
+// destPath: 要被覆盖的目标文件路径
+func BackupFileBeforeOverwrite(destPath string) error {
+	cfg := config.GetGlobalConfig()
+
+	// 计算相对路径
+	relPath, err := filepath.Rel(cfg.BackupRoot, destPath)
+	if err != nil {
+		return fmt.Errorf("计算相对路径失败: %v", err)
+	}
+
+	// 对每个备份目录执行备份
+	for _, backupDir := range cfg.BackupDirs {
+		if backupDir == "" {
+			continue
+		}
+
+		// 如果指定了备份子目录，则添加到路径中
+		backupBase := cfg.HandleHistoryDir(backupDir)
+
+		if cfg.Verbose {
+			fmt.Printf("备份将被覆盖的文件: %s -> %s\n", destPath, backupBase)
+		}
+
+		// 移动到备份目录
+		if err := moveToBackup(destPath, backupBase, relPath); err != nil {
+			return fmt.Errorf("备份到目录 %s 失败: %v", backupDir, err)
+		}
+
+		// 清理旧备份
+		if err := pruneBackups(backupBase, relPath, cfg.BackupKeep, cfg.Verbose); err != nil {
+			return fmt.Errorf("清理备份目录失败: %v", err)
+		}
+
+		// 只需要在一个备份目录中处理即可
+		break
+	}
+
+	return nil
+}
+
 // CleanupDeletedSrcFiles 清理已删除的源文件对应的目标文件
 // targetPaths: 当前扫描到的目标文件路径集合 (destPath -> srcPath)
 func CleanupDeletedSrcFiles(targetPaths map[string]string) {
